@@ -1,0 +1,95 @@
+[
+  {
+    "scene_id": "alarm.query",
+    "description": "告警查询与 TopN",
+    "required_slots": ["object_scope", "time_range"],
+    "conditional_slots": [],
+    "defaults": {
+      "time_range": {
+        "mode": "relative",
+        "preset": "last_24h"
+      }
+    },
+    "clarify_policy": {
+      "primary_slots": ["object_scope", "time_range"]
+    },
+    "keywords": ["告警", "报警", "top", "查询", "数量", "接口", "bgp", "flap", "错误包"],
+    "examples": [
+      "查告警",
+      "查近24小时核心网告警top10",
+      "今天广州区域严重告警数量",
+      "近24小时端口告警top5",
+      "近24小时接口错误包告警top10",
+      "近7天bgp抖动top20"
+    ],
+    "enabled": true
+  },
+  {
+    "scene_id": "device.query",
+    "description": "设备状态与离线分析",
+    "required_slots": ["time_range"],
+    "conditional_slots": [
+      {
+        "if_slot": "intent",
+        "equals": "trend",
+        "required_slots": ["device_id"]
+      },
+      {
+        "if_slot": "intent",
+        "equals": "offline_count",
+        "required_slots": ["region_id"]
+      }
+    ],
+    "defaults": {
+      "time_range": {
+        "mode": "relative",
+        "preset": "last_24h"
+      }
+    },
+    "clarify_policy": {
+      "primary_slots": ["device_id", "region_id", "time_range"]
+    },
+    "keywords": ["设备", "离线", "在线", "健康", "趋势", "cpu", "内存", "利用率"],
+    "examples": [
+      "昨天华东离线设备数",
+      "近7天设备10.2.3.4告警趋势",
+      "查设备状态",
+      "近24小时设备cpu利用率top10"
+    ],
+    "enabled": true
+  },
+  {
+    "scene_id": "alarm.analysis",
+    "description": "告警高级统计分析",
+    "required_slots": ["time_range"],
+    "conditional_slots": [],
+    "defaults": {},
+    "clarify_policy": {
+      "primary_slots": ["time_range"]
+    },
+    "keywords": ["统计", "关联率", "占比", "相关性", "同比", "环比", "分析", "趋势", "丢包率", "时延", "抖动", "吞吐", "带宽"],
+    "examples": [
+      "统计近7天每个地市告警与工单关联率",
+      "近30天按厂家分组的严重告警占比",
+      "近90天核心网告警同比环比",
+      "近7天各区域丢包率排名top10"
+    ],
+    "enabled": true
+  },
+  {
+    "scene_id": "ticket.analysis",
+    "description": "工单与告警关联分析",
+    "required_slots": ["time_range"],
+    "conditional_slots": [],
+    "defaults": {},
+    "clarify_policy": {
+      "primary_slots": ["time_range"]
+    },
+    "keywords": ["工单", "ticket", "关联"],
+    "examples": [
+      "近7天工单关联率",
+      "工单闭环时长分析"
+    ],
+    "enabled": true
+  }
+]

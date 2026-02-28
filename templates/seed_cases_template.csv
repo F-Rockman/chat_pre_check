@@ -1,0 +1,4 @@
+case_id,scene_id,label,text,route_type,slots_json,tags,priority,owner,version,enabled,risk_level,source,notes
+seed_alarm_topn_core_24h,alarm.query,查近24小时核心网告警Top10,查近24小时核心网告警Top10,route_template,"{""object_scope"":""core_network"",""time_range"":{""mode"":""relative"",""preset"":""last_24h""},""topn"":10}",alarm|topn|core,100,ops_team,v1,true,low,manual,模板稳定场景
+seed_packet_loss_rank_7d,alarm.analysis,近7天各区域丢包率排名Top10,近7天各区域丢包率排名Top10,route_template,"{""time_range"":{""mode"":""relative"",""preset"":""last_7d""},""metric"":""packet_loss"",""topn"":10}",analysis|packet_loss|ranking,120,ops_team,v1,true,medium,manual,分析类场景
+seed_alarm_ticket_rate_7d,alarm.analysis,统计近7天每个地市告警与工单关联率,统计近7天每个地市告警与工单关联率,route_nl2sql,"{""time_range"":{""mode"":""relative"",""preset"":""last_7d""}}",analysis|ticket|correlation,150,bi_team,v1,true,medium,manual,NL2SQL兜底场景

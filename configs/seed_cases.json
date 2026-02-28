@@ -1,0 +1,50 @@
+[
+  {
+    "case_id": "seed_alarm_topn_core_24h",
+    "scene_id": "alarm.query",
+    "label": "查近24小时核心网告警Top10",
+    "text": "查近24小时核心网告警Top10"
+  },
+  {
+    "case_id": "seed_interface_error_topn",
+    "scene_id": "alarm.query",
+    "label": "近24小时接口错误包告警Top10",
+    "text": "近24小时接口错误包告警Top10"
+  },
+  {
+    "case_id": "seed_bgp_flap_topn",
+    "scene_id": "alarm.query",
+    "label": "近7天华东BGP flap Top20",
+    "text": "近7天华东BGP flap Top20"
+  },
+  {
+    "case_id": "seed_device_cpu_hotspot",
+    "scene_id": "device.query",
+    "label": "近24小时设备CPU利用率Top10",
+    "text": "近24小时设备CPU利用率Top10"
+  },
+  {
+    "case_id": "seed_offline_region",
+    "scene_id": "device.query",
+    "label": "昨天华东离线设备数",
+    "text": "昨天华东离线设备数"
+  },
+  {
+    "case_id": "seed_packet_loss_rank",
+    "scene_id": "alarm.analysis",
+    "label": "近7天各区域丢包率排名Top10",
+    "text": "近7天各区域丢包率排名Top10"
+  },
+  {
+    "case_id": "seed_alarm_ticket_rate",
+    "scene_id": "alarm.analysis",
+    "label": "统计近7天每个地市告警与工单关联率",
+    "text": "统计近7天每个地市告警与工单关联率"
+  },
+  {
+    "case_id": "seed_alarm_qoq",
+    "scene_id": "alarm.analysis",
+    "label": "近90天核心网告警同比环比",
+    "text": "近90天核心网告警同比环比"
+  }
+]

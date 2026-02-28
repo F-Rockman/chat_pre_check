@@ -1,0 +1,33 @@
+{
+  "unknown_domain_keywords": [
+    "年终总结",
+    "写一段",
+    "写作文",
+    "诗",
+    "小说",
+    "翻译"
+  ],
+  "unsupported_domain_keywords": [
+    "股票",
+    "a股",
+    "基金",
+    "天气",
+    "电影票房"
+  ],
+  "policy_block_keywords": [
+    "破解",
+    "注入",
+    "越权"
+  ],
+  "data_unavailable_keywords": [
+    "模拟数据源故障"
+  ],
+  "max_input_chars": 1000,
+  "min_input_chars": 1,
+  "permission_rules": [
+    {
+      "roles": ["guest", "viewer"],
+      "keywords": ["财务", "利润", "薪资"]
+    }
+  ]
+}

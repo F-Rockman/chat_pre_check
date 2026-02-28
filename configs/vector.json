@@ -1,0 +1,33 @@
+{
+  "model_name": "intfloat/multilingual-e5-base",
+  "device": "cpu",
+  "scene_index": "scene_vector_v1",
+  "template_index": "template_vector_v1",
+  "seed_case_index": "seed_case_v1",
+  "device_index": "assets_device_v1",
+  "region_index": "assets_region_v1",
+  "scene_topk": 5,
+  "template_topk": 5,
+  "seed_case_topk": 5,
+  "default_timezone": "Asia/Shanghai",
+  "fusion_weights": {
+    "scene": {
+      "rule": 0.35,
+      "vector": 0.45,
+      "entity": 0.20
+    },
+    "template": {
+      "rule": 0.30,
+      "vector": 0.50,
+      "slot_fit": 0.20
+    }
+  },
+  "seed_scope_guard": {
+    "enabled": false,
+    "min_score": 0.58,
+    "min_hits": 1,
+    "topk": 5,
+    "allowed_scenes": []
+  },
+  "reindex_on_start": false
+}
