@@ -2,6 +2,27 @@
 
 对话场景前置校验引擎（拒答/推荐、追问、模板命中、NL2SQL 路由）。
 
+## 快速 Demo（本地）
+直接跑内置 demo（离线 mock，不依赖 OpenSearch）：
+```bash
+python main.py
+```
+
+跑网络运维 demo 集：
+```bash
+python main.py --demo-set network_ops
+```
+
+交互模式：
+```bash
+python main.py --interactive
+```
+
+真实依赖联调（live）：
+```bash
+python main.py --mode live --os-url http://localhost:9200 --demo-set all
+```
+
 ## 核心能力
 - 洋葱架构：`domain -> application -> infrastructure -> interfaces`
 - 决策链路：`Normalize -> Extract -> Enrich -> Policy -> Scope -> Scene -> Clarify -> Template -> NL2SQL`
