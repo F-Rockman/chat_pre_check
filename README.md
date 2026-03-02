@@ -118,3 +118,4 @@ python scripts/eval_network_ops_benchmark.py \
 - 生产使用与规则设计指南：[docs/PRODUCTION_GUIDE.md](docs/PRODUCTION_GUIDE.md)
 - seed_case 字段规范与导入指南：[docs/SEED_CASE_SPEC.md](docs/SEED_CASE_SPEC.md)
 - 检索后端切换（ES 当前 / OS 下一版）：`docs/PRODUCTION_GUIDE.md` 的 `2.2` 小节
+- 检索后端双栈开发指南：[docs/SEARCH_BACKEND_ARCHITECTURE_GUIDE.md](docs/SEARCH_BACKEND_ARCHITECTURE_GUIDE.md)
