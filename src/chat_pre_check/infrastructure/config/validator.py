@@ -128,6 +128,39 @@ def _validate_vector(vector: dict[str, Any]) -> None:
     if "min_hits" in guard and int(guard["min_hits"]) < 1:
         raise ValueError("seed_scope_guard.min_hits must be >= 1")
 
+    prefill = vector.get("param_prefill")
+    if prefill is None:
+        return
+    if not isinstance(prefill, dict):
+        raise ValueError("param_prefill must be object")
+    if "enabled" in prefill and not isinstance(prefill["enabled"], bool):
+        raise ValueError("param_prefill.enabled must be bool")
+    if "auto_commit" in prefill and not isinstance(prefill["auto_commit"], bool):
+        raise ValueError("param_prefill.auto_commit must be bool")
+    if (
+        "skip_remote_resolver_when_prefilled" in prefill
+        and not isinstance(prefill["skip_remote_resolver_when_prefilled"], bool)
+    ):
+        raise ValueError("param_prefill.skip_remote_resolver_when_prefilled must be bool")
+    if "dictionary_file" in prefill and not isinstance(prefill["dictionary_file"], str):
+        raise ValueError("param_prefill.dictionary_file must be str")
+    if "commit_score" in prefill and not (0 <= float(prefill["commit_score"]) <= 1):
+        raise ValueError("param_prefill.commit_score must be in [0,1]")
+    if "min_gap" in prefill and not (0 <= float(prefill["min_gap"]) <= 1):
+        raise ValueError("param_prefill.min_gap must be in [0,1]")
+    if "max_candidates_per_slot" in prefill and int(prefill["max_candidates_per_slot"]) < 1:
+        raise ValueError("param_prefill.max_candidates_per_slot must be >= 1")
+    if "ignore_case" in prefill and not isinstance(prefill["ignore_case"], bool):
+        raise ValueError("param_prefill.ignore_case must be bool")
+    if "default_word_boundary" in prefill and not isinstance(
+        prefill["default_word_boundary"], bool
+    ):
+        raise ValueError("param_prefill.default_word_boundary must be bool")
+    if "min_term_length" in prefill and int(prefill["min_term_length"]) < 1:
+        raise ValueError("param_prefill.min_term_length must be >= 1")
+    if "max_matches" in prefill and int(prefill["max_matches"]) < 1:
+        raise ValueError("param_prefill.max_matches must be >= 1")
+
 
 def _validate_rules(rules: dict[str, Any]) -> None:
     for key in (

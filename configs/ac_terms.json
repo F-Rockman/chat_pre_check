@@ -1,0 +1,121 @@
+[
+  {
+    "term": "华东",
+    "slot": "region_id",
+    "value": "east_cn",
+    "entity_id": "east_cn",
+    "entity_name": "华东",
+    "aliases": [
+      "华东区"
+    ],
+    "score": 0.99,
+    "metadata": {
+      "domain": "region"
+    }
+  },
+  {
+    "term": "华南",
+    "slot": "region_id",
+    "value": "south_cn",
+    "entity_id": "south_cn",
+    "entity_name": "华南",
+    "score": 0.99,
+    "metadata": {
+      "domain": "region"
+    }
+  },
+  {
+    "term": "华北",
+    "slot": "region_id",
+    "value": "north_cn",
+    "entity_id": "north_cn",
+    "entity_name": "华北",
+    "score": 0.99,
+    "metadata": {
+      "domain": "region"
+    }
+  },
+  {
+    "term": "广州",
+    "slot": "region_id",
+    "value": "region_gz",
+    "entity_id": "region_gz",
+    "entity_name": "广州",
+    "score": 0.99,
+    "metadata": {
+      "domain": "region"
+    }
+  },
+  {
+    "term": "北京",
+    "slot": "region_id",
+    "value": "region_bj",
+    "entity_id": "region_bj",
+    "entity_name": "北京",
+    "score": 0.99,
+    "metadata": {
+      "domain": "region"
+    }
+  },
+  {
+    "term": "10.2.3.4",
+    "slot": "device_id",
+    "value": "dev_10_2_3_4",
+    "entity_id": "dev_10_2_3_4",
+    "entity_name": "设备10.2.3.4",
+    "score": 0.99,
+    "metadata": {
+      "domain": "device"
+    }
+  },
+  {
+    "term": "设备A",
+    "slot": "device_id",
+    "value": "dev_a",
+    "entity_id": "dev_a",
+    "entity_name": "设备A",
+    "aliases": [
+      "设备a"
+    ],
+    "score": 0.95,
+    "metadata": {
+      "domain": "device"
+    }
+  },
+  {
+    "term": "核心网",
+    "slot": "object_scope",
+    "value": "core_network",
+    "score": 0.95
+  },
+  {
+    "term": "全网",
+    "slot": "object_scope",
+    "value": "network",
+    "score": 0.95
+  },
+  {
+    "term": "未恢复",
+    "slot": "alarm_status",
+    "value": "active",
+    "score": 0.95
+  },
+  {
+    "term": "已恢复",
+    "slot": "alarm_status",
+    "value": "closed",
+    "score": 0.95
+  },
+  {
+    "term": "严重",
+    "slot": "severity",
+    "value": "critical",
+    "score": 0.95
+  },
+  {
+    "term": "次严重",
+    "slot": "severity",
+    "value": "major",
+    "score": 0.95
+  }
+]

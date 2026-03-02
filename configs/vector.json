@@ -30,5 +30,18 @@
     "topk": 5,
     "allowed_scenes": []
   },
+  "param_prefill": {
+    "enabled": false,
+    "dictionary_file": "ac_terms.json",
+    "auto_commit": true,
+    "commit_score": 0.95,
+    "min_gap": 0.05,
+    "max_candidates_per_slot": 3,
+    "ignore_case": true,
+    "default_word_boundary": true,
+    "min_term_length": 2,
+    "max_matches": 200,
+    "skip_remote_resolver_when_prefilled": true
+  },
   "reindex_on_start": false
 }

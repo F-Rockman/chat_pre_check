@@ -10,6 +10,7 @@ from chat_pre_check.application.middlewares.entity_extractor import EntityExtrac
 from chat_pre_check.application.middlewares.input_guard import InputGuardMiddleware
 from chat_pre_check.application.middlewares.nl2sql_router import NL2SQLRouterMiddleware
 from chat_pre_check.application.middlewares.normalize import NormalizeMiddleware
+from chat_pre_check.application.middlewares.param_prefill import ParamPrefillMiddleware
 from chat_pre_check.application.middlewares.policy_guard import PolicyGuardMiddleware
 from chat_pre_check.application.middlewares.scene_router import SceneRouterMiddleware
 from chat_pre_check.application.middlewares.seed_scope_guard import SeedScopeGuardMiddleware
@@ -23,6 +24,7 @@ from chat_pre_check.domain.enums import OutOfScopeReason
 from chat_pre_check.domain.models import RequestContext, SearchHit
 from chat_pre_check.infrastructure.config.loader import load_app_config
 from chat_pre_check.infrastructure.embedding.e5_embedder import E5Embedder
+from chat_pre_check.infrastructure.extractors.ac_prefill import build_slot_prefiller
 from chat_pre_check.infrastructure.repositories.inmemory_repos import (
     InMemoryCaseRepository,
     InMemorySceneRepository,
@@ -88,6 +90,10 @@ def build_engine(
     vector_cfg = config.vector
     scene_weights = vector_cfg["fusion_weights"]["scene"]
     template_weights = vector_cfg["fusion_weights"]["template"]
+    prefill_cfg = vector_cfg.get("param_prefill", {})
+    if not isinstance(prefill_cfg, dict):
+        prefill_cfg = {}
+    slot_prefiller = build_slot_prefiller(config_dir=config_dir, prefill_cfg=prefill_cfg)
     default_timezone = vector_cfg.get("default_timezone", _local_timezone())
     slot_policy_engine = SlotPolicyEngine(config.slot_policies)
 
@@ -142,12 +148,23 @@ def build_engine(
                 min_input_chars=int(config.rules.get("min_input_chars", 1)),
             ),
             EntityExtractorMiddleware(default_timezone=default_timezone),
+            ParamPrefillMiddleware(
+                prefiller=slot_prefiller,
+                enabled=bool(prefill_cfg.get("enabled", False)),
+                auto_commit=bool(prefill_cfg.get("auto_commit", True)),
+                commit_score=float(prefill_cfg.get("commit_score", 0.95)),
+                min_gap=float(prefill_cfg.get("min_gap", 0.05)),
+                max_candidates_per_slot=int(prefill_cfg.get("max_candidates_per_slot", 3)),
+            ),
             EntityEnricherMiddleware(
                 device_resolver=device_resolver,
                 region_resolver=region_resolver,
                 recommendation_service=recommendation_service,
                 commit_score=thresholds["resolver_commit_score"],
                 min_gap=thresholds["resolver_min_gap"],
+                skip_resolver_when_prefilled=bool(
+                    prefill_cfg.get("skip_remote_resolver_when_prefilled", True)
+                ),
             ),
             PolicyGuardMiddleware(
                 rules=config.rules,

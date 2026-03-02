@@ -64,6 +64,21 @@ python scripts/build_vector_indices.py --search-url http://localhost:9200 --conf
 python scripts/build_vector_indices.py --search-url http://localhost:9200 --search-backend elasticsearch --config-dir configs
 ```
 
+## 导出 AC 提参词表（数据库 -> ac_terms.json）
+从检索库（设备/地域索引）导出词条并生成 `configs/ac_terms.json`：
+```bash
+python scripts/export_ac_terms.py \
+  --search-url http://localhost:9200 \
+  --search-backend elasticsearch \
+  --config-dir configs \
+  --output configs/ac_terms.json \
+  --merge-existing
+```
+
+启用 AC 预提参（`configs/vector.json`）：
+- `param_prefill.enabled=true`
+- `param_prefill.dictionary_file=ac_terms.json`
+
 `seed_case_v1` 接口已预留（默认关闭能力边界拦截）：
 - 索引名配置：`configs/vector.json -> seed_case_index`
 - 后端开关：`configs/vector.json -> search_backend`（`opensearch` / `elasticsearch`）

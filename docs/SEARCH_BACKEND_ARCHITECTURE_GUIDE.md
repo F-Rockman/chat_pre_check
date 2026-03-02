@@ -42,11 +42,14 @@
 | `opensearch_client.py` | OS 实现 | `knn_vector` 索引、`knn` 查询、`text_search`、重试 |
 | `elasticsearch_client.py` | ES 实现 | `dense_vector` 索引、`knn` 查询 + `script_score` 回退、重试 |
 | `opensearch_vector_retriever.py` | 后端无关检索器 | 调用 `client.knn_search/text_search`，进行融合打分 |
+| `infrastructure/extractors/ac_prefill.py` | AC 提参算法 | AC 自动机构建、词表加载、槽位候选输出 |
+| `application/middlewares/param_prefill.py` | 预提参中间件 | 把 AC 命中结果写入 `ctx.slots/ctx.entities` |
 | `device_resolver.py` / `region_resolver.py` | 实体解析 | 依赖 `client.text_search`，对设备/地域候选归一化 |
 | `interfaces/api/app.py` | API 入口 | 支持 `CHAT_PRE_CHECK_SEARCH_BACKEND` |
 | `interfaces/cli/main.py` | CLI 入口 | 支持 `--search-backend` |
 | `livemain.py` | 运维/联调入口 | 统一后端探活与索引存在性检查 |
 | `scripts/build_vector_indices.py` | 索引构建 | 支持 `--search-backend`，按后端建索引并写入 |
+| `scripts/export_ac_terms.py` | AC 词表导出 | 从设备/地域索引导出词条并生成 `ac_terms.json` |
 | `configs/vector.json` | 配置默认值 | `search_backend` 默认配置 |
 | `validator.py` | 配置校验 | 校验 `search_backend` 可选值合法性 |
 
@@ -93,13 +96,15 @@
 
 ### 6.2 单次请求路由流程（与后端相关步骤）
 `PrecheckEngine.route` -> middleware pipeline：
-1. `EntityEnricherMiddleware`
+1. `ParamPrefillMiddleware`（可开关）
+   - AC 状态机在本地文本内匹配词表，提前产出 `device_id/region_id/object_scope...`
+2. `EntityEnricherMiddleware`
    - 调用设备/地域 resolver，resolver 内部走 `text_search`
-2. `ScopeGateMiddleware`
+3. `ScopeGateMiddleware`
    - 调用 `retriever.search_scene`，内部走 `knn + text` 融合
-3. `SeedScopeGuardMiddleware`（可选）
+4. `SeedScopeGuardMiddleware`（可选）
    - 调用 `search_seed_cases`
-4. `TemplateMatcherMiddleware`
+5. `TemplateMatcherMiddleware`
    - 调用 `search_template`，内部走 `knn + text` 融合
 
 ### 6.3 索引构建流程
@@ -127,17 +132,19 @@
 | 1 | `NormalizeMiddleware` | 文本归一化（去首尾空格、统一大小写、标点归一） | 写入 `ctx.norm_text`；继续 |
 | 2 | `InputGuardMiddleware` | 校验输入长度上下限 | 空输入 -> `CLARIFY`；超长 -> `REFUSE`；否则继续 |
 | 3 | `EntityExtractorMiddleware` | 规则抽取实体（时间、topN、严重级别、意图等） | 写入 `ctx.entities/ctx.slots`；继续 |
-| 4 | `EntityEnricherMiddleware` | 调用 `device/region resolver` 做实体候选补全 | 解析失败 -> `REFUSE(data_unavailable)`；成功则按 `commit_score + min_gap` 自动落槽位（如 `device_id/region_id`）并继续 |
-| 5 | `PolicyGuardMiddleware` | 关键词与权限策略拦截 | 命中策略/权限/域外词 -> `REFUSE`；否则继续 |
-| 6 | `ScopeGateMiddleware` | 场景识别与范围判定（规则分 + 向量分 + 实体覆盖分融合） | 低于 `T_scope` -> `REFUSE(unsupported_domain)`；与次高分差小于 `T_scene_gap` -> `CLARIFY(scene)`；否则写入 `ctx.scene` 并继续 |
-| 7 | `SceneRouterMiddleware` | 兜底同步场景（含 `context.scene` 覆盖） | 更新 `ctx.scene`；继续 |
-| 8 | `SeedScopeGuardMiddleware` | 基于 seed case 做能力边界守卫（可开关） | 关闭则跳过；检索失败 -> `REFUSE(data_unavailable)`；低于 `min_score/min_hits` 或场景不在白名单 -> `REFUSE(out_of_seed_scope)`；否则继续 |
-| 9 | `SlotClarifierMiddleware` | 补默认槽位、计算必填/条件必填槽位、选择追问槽位 | 槽位不全 -> `CLARIFY(missing_slots)`；槽位齐全继续 |
-| 10 | `TemplateMatcherMiddleware` | 模板匹配（规则分 + 向量分 + 槽位适配分融合） | 分低于 `T_template` -> 继续；命中但缺槽位 -> `CLARIFY`；命中且槽位齐全 -> `ROUTE_TEMPLATE` |
-| 11 | `NL2SQLRouterMiddleware` | 模板未命中的最终路由 | 返回 `ROUTE_NL2SQL` |
+| 4 | `ParamPrefillMiddleware` | 基于 AC 状态机匹配词库（设备/地域/IP/告警域词） | 命中后写入 `ctx.entities`，满足阈值时可自动落槽位；未命中继续 |
+| 5 | `EntityEnricherMiddleware` | 调用 `device/region resolver` 做实体候选补全 | 正常合并候选并落槽位；resolver 异常时若已有预提参则继续，否则 `REFUSE(data_unavailable)` |
+| 6 | `PolicyGuardMiddleware` | 关键词与权限策略拦截 | 命中策略/权限/域外词 -> `REFUSE`；否则继续 |
+| 7 | `ScopeGateMiddleware` | 场景识别与范围判定（规则分 + 向量分 + 实体覆盖分融合） | 低于 `T_scope` -> `REFUSE(unsupported_domain)`；与次高分差小于 `T_scene_gap` -> `CLARIFY(scene)`；否则写入 `ctx.scene` 并继续 |
+| 8 | `SceneRouterMiddleware` | 兜底同步场景（含 `context.scene` 覆盖） | 更新 `ctx.scene`；继续 |
+| 9 | `SeedScopeGuardMiddleware` | 基于 seed case 做能力边界守卫（可开关） | 关闭则跳过；检索失败 -> `REFUSE(data_unavailable)`；低于 `min_score/min_hits` 或场景不在白名单 -> `REFUSE(out_of_seed_scope)`；否则继续 |
+| 10 | `SlotClarifierMiddleware` | 补默认槽位、计算必填/条件必填槽位、选择追问槽位 | 槽位不全 -> `CLARIFY(missing_slots)`；槽位齐全继续 |
+| 11 | `TemplateMatcherMiddleware` | 模板匹配（规则分 + 向量分 + 槽位适配分融合） | 分低于 `T_template` -> 继续；命中但缺槽位 -> `CLARIFY`；命中且槽位齐全 -> `ROUTE_TEMPLATE` |
+| 12 | `NL2SQLRouterMiddleware` | 模板未命中的最终路由 | 返回 `ROUTE_NL2SQL` |
 
 #### 6.4.3 每一步“干了啥”的核心技术点
 - `ScopeGate`：不是只靠向量召回，而是把 `rule/vector/entity` 三路分数做加权，减少单一路径误判。
+- `ParamPrefill`：AC 匹配把“可确定参数”提前落到上下文，减少后续大模型或远端检索依赖。
 - `SeedScopeGuard`：在“场景已判定”后再做能力边界裁剪，防止路由到尚未开放的 NL2SQL 能力面。
 - `SlotClarifier`：支持 `required_slots + conditional_slots + defaults`，不是固定字段表。
 - `TemplateMatcher`：支持 `negative_keywords` 将规则分直接置 0，避免反向语义误命中模板。
@@ -191,9 +198,22 @@
 `configs/vector.json`：
 ```json
 {
-  "search_backend": "opensearch"
+  "search_backend": "opensearch",
+  "param_prefill": {
+    "enabled": false,
+    "dictionary_file": "ac_terms.json",
+    "auto_commit": true,
+    "commit_score": 0.95,
+    "min_gap": 0.05,
+    "max_candidates_per_slot": 3,
+    "skip_remote_resolver_when_prefilled": true
+  }
 }
 ```
+
+`configs/ac_terms.json`（可由服务数据库导出）：
+- 词条字段：`term/aliases/slot/value/entity_id/entity_name/score/metadata`
+- 典型槽位：`region_id`、`device_id`、`object_scope`、`severity`、`alarm_status`
 
 ### 8.2 环境变量
 ```bash
@@ -218,6 +238,10 @@ python livemain.py --os-url http://localhost:9200 --search-backend elasticsearch
 ```bash
 python scripts/build_vector_indices.py --search-url http://localhost:9200 --search-backend elasticsearch --config-dir configs
 ```
+- 导出 AC 词表（设备/地域）
+```bash
+python scripts/export_ac_terms.py --search-url http://localhost:9200 --search-backend elasticsearch --config-dir configs --output configs/ac_terms.json --merge-existing
+```
 
 ## 9. 错误处理与降级策略
 
@@ -226,7 +250,10 @@ python scripts/build_vector_indices.py --search-url http://localhost:9200 --sear
 - ES 缺依赖时在初始化明确报错（提示安装 `elasticsearch` 包）
 
 ### 9.2 流水线层
-- `scene_retrieval_failed` / `template_retrieval_failed` / `resolver_unavailable` -> `refuse(data_unavailable)`
+- `scene_retrieval_failed` / `template_retrieval_failed` -> `refuse(data_unavailable)`
+- `resolver_unavailable`：
+  - 无预提参与无已落槽位 -> `refuse(data_unavailable)`
+  - 有 AC 预提参候选或已落槽位 -> 继续后续流程（避免过度拒答）
 - 无远端地址时自动走 `EmptyRetriever + NoopResolver`，不中断服务
 
 ### 9.3 运维层（livemain）
