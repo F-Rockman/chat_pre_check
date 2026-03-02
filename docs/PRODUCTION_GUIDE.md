@@ -27,13 +27,99 @@ python scripts/check_config.py --config-dir configs
 
 3. （可选）构建向量索引
 ```bash
-python scripts/build_vector_indices.py --os http://localhost:9200 --config-dir configs
+python scripts/build_vector_indices.py --search-url http://localhost:9200 --config-dir configs
+python scripts/build_vector_indices.py --search-url http://localhost:9200 --search-backend elasticsearch --config-dir configs
 ```
 
 4. 启动 API
 ```bash
 uvicorn chat_pre_check.interfaces.api.app:create_app --factory --reload
 ```
+
+### 2.1 无 OpenSearch 运行可行性
+可行，但建议用于以下场景：
+- PoC、离线环境、低成本部署、边缘节点
+- 能力范围较收敛，且接受召回率低于向量检索版
+
+当前已提供本地 fallback 能力（启发式检索 + 规则解析）：
+```bash
+python livemain.py --without-opensearch
+```
+
+### 2.2 检索后端部署切换说明（ES 当前 / OS 下一版）
+当前工程支持 `Elasticsearch` 与 `OpenSearch` 双后端，通过开关切换。
+
+后端开关优先级（高 -> 低）：
+1. 命令行参数：`--search-backend`
+2. 环境变量：`CHAT_PRE_CHECK_SEARCH_BACKEND`
+3. 配置文件：`configs/vector.json -> search_backend`
+4. 默认值：`opensearch`
+
+可选值：
+- `elasticsearch`（或 `es`）
+- `opensearch`
+
+#### A. 当前版本部署到 Elasticsearch（推荐你当前环境使用）
+1. 设置后端与地址
+```bash
+# Linux/macOS
+export CHAT_PRE_CHECK_SEARCH_BACKEND=elasticsearch
+export CHAT_PRE_CHECK_OS_URL=http://<es-host>:9200
+
+# Windows PowerShell
+$env:CHAT_PRE_CHECK_SEARCH_BACKEND="elasticsearch"
+$env:CHAT_PRE_CHECK_OS_URL="http://<es-host>:9200"
+```
+
+2. 构建向量索引
+```bash
+python scripts/build_vector_indices.py \
+  --search-url http://<es-host>:9200 \
+  --search-backend elasticsearch \
+  --config-dir configs
+```
+
+3. 启动服务
+```bash
+uvicorn chat_pre_check.interfaces.api.app:create_app --factory --reload
+```
+
+4. 本地探活（可选）
+```bash
+python livemain.py --search-backend elasticsearch --os-url http://<es-host>:9200
+```
+
+#### B. 下一版本切换到 OpenSearch
+1. 先准备 OpenSearch 集群地址（不要直接复用 ES 索引）
+2. 切换后端开关
+```bash
+# Linux/macOS
+export CHAT_PRE_CHECK_SEARCH_BACKEND=opensearch
+export CHAT_PRE_CHECK_OS_URL=http://<os-host>:9200
+
+# Windows PowerShell
+$env:CHAT_PRE_CHECK_SEARCH_BACKEND="opensearch"
+$env:CHAT_PRE_CHECK_OS_URL="http://<os-host>:9200"
+```
+
+3. 在 OpenSearch 上重建索引
+```bash
+python scripts/build_vector_indices.py \
+  --search-url http://<os-host>:9200 \
+  --search-backend opensearch \
+  --config-dir configs
+```
+
+4. 重启服务并验证
+```bash
+uvicorn chat_pre_check.interfaces.api.app:create_app --factory --reload
+python livemain.py --search-backend opensearch --os-url http://<os-host>:9200
+```
+
+#### C. 灰度与回滚建议
+- 灰度：先在一台实例上设置 `CHAT_PRE_CHECK_SEARCH_BACKEND=opensearch`，观察路由准确率和稳定性指标后再全量。
+- 回滚：将该变量改回 `elasticsearch` 并重启实例即可，应用层无代码回滚依赖。
+- 建议：ES 与 OpenSearch 使用各自集群和各自索引生命周期管理，避免同名索引造成运维混淆。
 
 ## 3. 对外接口
 ### 3.1 请求
@@ -71,7 +157,7 @@ uvicorn chat_pre_check.interfaces.api.app:create_app --factory --reload
 - `configs/cases.json`
 - `configs/rules.json`
 - `configs/thresholds.json`
-- `configs/vector.json`
+- `configs/vector.json`（含 `search_backend` 开关：`opensearch` / `elasticsearch`）
 - `configs/slot_policies.json`
 - `configs/seed_cases.json`（用于 `seed_case_v1` 向量索引）
 
@@ -197,6 +283,22 @@ python -m pytest -q tests/acceptance/test_network_ops_extended.py
 ### 8.4 集成测试（真实 OpenSearch）
 ```bash
 python -m pytest -q -m integration --os-base-url http://localhost:9200
+```
+
+### 8.5 准确率与稳定性基线
+先生成网络运维 benchmark 数据：
+```bash
+python scripts/build_network_ops_benchmark_datasets.py
+```
+
+数据集说明：
+- `benchmark/network_ops_business_golden_v1.json`：业务黄金集（衡量真实准确率）
+- `benchmark/network_ops_regression_local_fallback_v1.json`：本地回归集（衡量稳定性/回归）
+
+评测命令：
+```bash
+python scripts/eval_network_ops_benchmark.py --dataset benchmark/network_ops_business_golden_v1.json --profile local_fallback --repeat 3
+python scripts/eval_network_ops_benchmark.py --dataset benchmark/network_ops_regression_local_fallback_v1.json --profile local_fallback --repeat 3 --min-accuracy 1.0 --min-stability 1.0
 ```
 
 ## 9. 生产运维建议

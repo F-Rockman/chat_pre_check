@@ -30,8 +30,10 @@ from chat_pre_check.infrastructure.repositories.inmemory_repos import (
 )
 from chat_pre_check.infrastructure.resolvers.device_resolver import DeviceResolver
 from chat_pre_check.infrastructure.resolvers.noop_resolver import NoopResolver
-from chat_pre_check.infrastructure.resolvers.opensearch_client import OpenSearchClient
 from chat_pre_check.infrastructure.resolvers.region_resolver import RegionResolver
+from chat_pre_check.infrastructure.resolvers.search_client_factory import (
+    build_search_client,
+)
 from chat_pre_check.infrastructure.retrievers.opensearch_vector_retriever import (
     OpenSearchVectorRetriever,
 )
@@ -64,6 +66,7 @@ def build_engine(
     config_dir: str = "configs",
     *,
     os_url: str | None = None,
+    search_backend: str | None = None,
     os_username: str | None = None,
     os_password: str | None = None,
     os_bearer_token: str | None = None,
@@ -94,8 +97,10 @@ def build_engine(
     if retriever is None or device_resolver is None or region_resolver is None:
         os_url = os_url or os.getenv("CHAT_PRE_CHECK_OS_URL")
         if os_url:
-            client = OpenSearchClient(
+            _, client = build_search_client(
+                vector_cfg=vector_cfg,
                 base_url=os_url,
+                backend_override=search_backend,
                 username=os_username or os.getenv("CHAT_PRE_CHECK_OS_USERNAME"),
                 password=os_password or os.getenv("CHAT_PRE_CHECK_OS_PASSWORD"),
                 bearer_token=os_bearer_token or os.getenv("CHAT_PRE_CHECK_OS_BEARER_TOKEN"),

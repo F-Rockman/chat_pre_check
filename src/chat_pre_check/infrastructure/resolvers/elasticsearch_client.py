@@ -3,10 +3,8 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from opensearchpy import OpenSearch
 
-
-class OpenSearchClient:
+class ElasticsearchClient:
     def __init__(
         self,
         base_url: str,
@@ -17,19 +15,24 @@ class OpenSearchClient:
         max_retries: int = 1,
         retry_backoff_sec: float = 0.2,
     ) -> None:
-        http_auth = None
-        headers = {}
-        if username and password:
-            http_auth = (username, password)
+        try:
+            from elasticsearch import Elasticsearch
+        except Exception as exc:  # pragma: no cover - import guard path
+            raise RuntimeError(
+                "Elasticsearch backend selected but package 'elasticsearch' is not installed. "
+                "Install it with: pip install elasticsearch>=8.15.0"
+            ) from exc
+
+        headers: dict[str, str] = {}
         if bearer_token:
             headers["Authorization"] = f"Bearer {bearer_token}"
-        self.client = OpenSearch(
+        auth = (username, password) if username and password else None
+        self.client = Elasticsearch(
             hosts=[base_url],
-            http_auth=http_auth,
-            headers=headers,
-            use_ssl=base_url.startswith("https"),
+            basic_auth=auth,
+            headers=headers or None,
             verify_certs=False,
-            timeout=timeout,
+            request_timeout=timeout,
         )
         self.max_retries = max_retries
         self.retry_backoff_sec = retry_backoff_sec
@@ -50,11 +53,8 @@ class OpenSearchClient:
             return
         body = {
             "settings": {
-                "index": {
-                    "knn": True,
-                    "number_of_shards": 1,
-                    "number_of_replicas": 0,
-                }
+                "number_of_shards": 1,
+                "number_of_replicas": 0,
             },
             "mappings": {
                 "properties": {
@@ -64,13 +64,10 @@ class OpenSearchClient:
                     "text": {"type": "text"},
                     "metadata": {"type": "object", "enabled": True},
                     "vector": {
-                        "type": "knn_vector",
-                        "dimension": dimension,
-                        "method": {
-                            "name": "hnsw",
-                            "space_type": "cosinesimil",
-                            "engine": "nmslib",
-                        },
+                        "type": "dense_vector",
+                        "dims": dimension,
+                        "index": True,
+                        "similarity": "cosine",
                     },
                 }
             },
@@ -88,7 +85,7 @@ class OpenSearchClient:
         if operations:
             self._with_retry(
                 "bulk",
-                lambda: self.client.bulk(body=operations, refresh=True),
+                lambda: self.client.bulk(operations=operations, refresh=True),
             )
 
     def knn_search(
@@ -106,10 +103,10 @@ class OpenSearchClient:
                     "must": [
                         {
                             "knn": {
-                                "vector": {
-                                    "vector": vector,
-                                    "k": topk,
-                                }
+                                "field": "vector",
+                                "query_vector": vector,
+                                "k": topk,
+                                "num_candidates": max(topk * 4, 50),
                             }
                         }
                     ],
@@ -117,11 +114,35 @@ class OpenSearchClient:
                 }
             },
         }
-        response = self._with_retry(
-            "search_knn",
-            lambda: self.client.search(index=index_name, body=body),
-        )
-        return response.get("hits", {}).get("hits", [])
+        try:
+            response = self._with_retry(
+                "search_knn",
+                lambda: self.client.search(index=index_name, body=body),
+            )
+            return response.get("hits", {}).get("hits", [])
+        except Exception:
+            # Fallback for clusters without knn query support.
+            fallback = {
+                "size": topk,
+                "query": {
+                    "script_score": {
+                        "query": {
+                            "bool": {
+                                "filter": must_filters,
+                            }
+                        },
+                        "script": {
+                            "source": "cosineSimilarity(params.query_vector, 'vector') + 1.0",
+                            "params": {"query_vector": vector},
+                        },
+                    }
+                },
+            }
+            response = self._with_retry(
+                "search_knn_script_score",
+                lambda: self.client.search(index=index_name, body=fallback),
+            )
+            return response.get("hits", {}).get("hits", [])
 
     def text_search(
         self,
@@ -165,4 +186,4 @@ class OpenSearchClient:
                 if attempt >= self.max_retries:
                     break
                 time.sleep(self.retry_backoff_sec * (attempt + 1))
-        raise RuntimeError(f"OpenSearch operation failed: {operation}: {last_error}")
+        raise RuntimeError(f"Elasticsearch operation failed: {operation}: {last_error}")

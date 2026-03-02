@@ -15,11 +15,17 @@ def main() -> None:
     parser.add_argument("--role", default=None)
     parser.add_argument("--tenant-id", default=None)
     parser.add_argument("--os-url", default=None)
+    parser.add_argument(
+        "--search-backend",
+        choices=["opensearch", "elasticsearch", "es"],
+        default=None,
+    )
     args = parser.parse_args()
 
     engine = build_engine(
         config_dir=args.config_dir,
         os_url=args.os_url,
+        search_backend=args.search_backend,
     )
     decision = engine.route(
         RouteRequest(

@@ -15,6 +15,7 @@ dependencies = [
   "uvicorn>=0.30.0",
   "pydantic>=2.8.0",
   "opensearch-py>=2.6.0",
+  "elasticsearch>=8.15.0",
   "numpy>=1.26.0",
   "sentence-transformers>=3.0.0",
 ]

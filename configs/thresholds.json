@@ -1,6 +1,6 @@
 {
   "T_scope": 0.52,
-  "T_template": 0.62,
+  "T_template": 0.8,
   "T_scene_gap": 0.08,
   "resolver_commit_score": 0.78,
   "resolver_min_gap": 0.12

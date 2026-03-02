@@ -7,7 +7,9 @@ from typing import Any
 
 from chat_pre_check.infrastructure.config.loader import load_app_config
 from chat_pre_check.infrastructure.embedding.e5_embedder import E5Embedder
-from chat_pre_check.infrastructure.resolvers.opensearch_client import OpenSearchClient
+from chat_pre_check.infrastructure.resolvers.search_client_factory import (
+    build_search_client,
+)
 
 
 def build_scene_docs(scenes: list[dict[str, Any]], embedder: E5Embedder) -> list[dict[str, Any]]:
@@ -98,8 +100,22 @@ def build_seed_case_docs(seed_cases: list[dict[str, Any]], embedder: E5Embedder)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Build OpenSearch vector indices")
-    parser.add_argument("--os", dest="os_url", required=True, help="OpenSearch base URL")
+    parser = argparse.ArgumentParser(
+        description="Build vector indices for OpenSearch or Elasticsearch"
+    )
+    parser.add_argument(
+        "--search-url",
+        "--os",
+        dest="os_url",
+        required=True,
+        help="Search backend base URL",
+    )
+    parser.add_argument(
+        "--search-backend",
+        choices=["opensearch", "elasticsearch", "es"],
+        default=None,
+        help="Search backend type. Default reads CHAT_PRE_CHECK_SEARCH_BACKEND or vector.search_backend.",
+    )
     parser.add_argument("--config-dir", default="configs")
     parser.add_argument("--username", default=None)
     parser.add_argument("--password", default=None)
@@ -116,8 +132,10 @@ def main() -> None:
         model_name=vector_cfg["model_name"],
         device=vector_cfg.get("device", "cpu"),
     )
-    client = OpenSearchClient(
+    backend, client = build_search_client(
+        vector_cfg=vector_cfg,
         base_url=args.os_url,
+        backend_override=args.search_backend,
         username=args.username,
         password=args.password,
     )
@@ -142,7 +160,8 @@ def main() -> None:
     print(
         f"indexed scene_docs={len(scene_docs)} template_docs={len(template_docs)} "
         f"seed_docs={len(seed_docs)} into "
-        f"{vector_cfg['scene_index']}/{vector_cfg['template_index']}/{vector_cfg['seed_case_index']}"
+        f"{vector_cfg['scene_index']}/{vector_cfg['template_index']}/{vector_cfg['seed_case_index']} "
+        f"(backend={backend})"
     )
 
 

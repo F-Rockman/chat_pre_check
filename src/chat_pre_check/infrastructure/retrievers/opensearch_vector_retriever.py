@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+from typing import Any
+
 from chat_pre_check.domain.interfaces import Embedder
 from chat_pre_check.domain.models import SearchHit
-from chat_pre_check.infrastructure.resolvers.opensearch_client import OpenSearchClient
 
 
 class OpenSearchVectorRetriever:
     def __init__(
         self,
-        client: OpenSearchClient,
+        client: Any,
         embedder: Embedder,
         scene_index: str,
         template_index: str,

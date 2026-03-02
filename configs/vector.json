@@ -1,4 +1,5 @@
 {
+  "search_backend": "opensearch",
   "model_name": "intfloat/multilingual-e5-base",
   "device": "cpu",
   "scene_index": "scene_vector_v1",

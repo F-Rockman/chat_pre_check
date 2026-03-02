@@ -14,6 +14,7 @@ def _engine_singleton():
     return build_engine(
         config_dir=os.getenv("CHAT_PRE_CHECK_CONFIG_DIR", "configs"),
         os_url=os.getenv("CHAT_PRE_CHECK_OS_URL"),
+        search_backend=os.getenv("CHAT_PRE_CHECK_SEARCH_BACKEND"),
         os_username=os.getenv("CHAT_PRE_CHECK_OS_USERNAME"),
         os_password=os.getenv("CHAT_PRE_CHECK_OS_PASSWORD"),
         os_bearer_token=os.getenv("CHAT_PRE_CHECK_OS_BEARER_TOKEN"),

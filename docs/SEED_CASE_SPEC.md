@@ -96,7 +96,7 @@ python scripts/import_seed_cases.py \
 2. 导入脚本生成 `configs/seed_cases.json`
 3. 向量索引构建：
 ```bash
-python scripts/build_vector_indices.py --os http://localhost:9200 --config-dir configs
+python scripts/build_vector_indices.py --search-url http://localhost:9200 --config-dir configs
 ```
 4. 灰度开启：
 - 先设 `seed_scope_guard.enabled=true`

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from typing import Any
+
 from chat_pre_check.domain.models import Candidate
-from chat_pre_check.infrastructure.resolvers.opensearch_client import OpenSearchClient
 
 
 class RegionResolver:
-    def __init__(self, client: OpenSearchClient, index_name: str) -> None:
+    def __init__(self, client: Any, index_name: str) -> None:
         self.client = client
         self.index_name = index_name
 

@@ -8,6 +8,27 @@
 python main.py
 ```
 
+## Live 一把跑（推荐 VSCode）
+优先连接本地向量检索后端（OpenSearch/Elasticsearch），连不上自动切到无检索后端的本地 fallback：
+```bash
+python livemain.py
+```
+
+指定后端为 Elasticsearch：
+```bash
+python livemain.py --search-backend elasticsearch --os-url http://localhost:9200
+```
+
+强制无 OpenSearch 模式：
+```bash
+python livemain.py --without-opensearch
+```
+
+必须用检索后端（不可用则退出）：
+```bash
+python livemain.py --require-opensearch
+```
+
 跑网络运维 demo 集：
 ```bash
 python main.py --demo-set network_ops
@@ -39,11 +60,13 @@ uvicorn chat_pre_check.interfaces.api.app:create_app --factory --reload
 
 ## 构建向量索引
 ```bash
-python scripts/build_vector_indices.py --os http://localhost:9200 --config-dir configs
+python scripts/build_vector_indices.py --search-url http://localhost:9200 --config-dir configs
+python scripts/build_vector_indices.py --search-url http://localhost:9200 --search-backend elasticsearch --config-dir configs
 ```
 
 `seed_case_v1` 接口已预留（默认关闭能力边界拦截）：
 - 索引名配置：`configs/vector.json -> seed_case_index`
+- 后端开关：`configs/vector.json -> search_backend`（`opensearch` / `elasticsearch`）
 - 守卫开关：`configs/vector.json -> seed_scope_guard.enabled`
 - 槽位追问策略：`configs/slot_policies.json`
 
@@ -66,6 +89,32 @@ python -m pytest -q tests/acceptance/test_network_ops_extended.py
 python -m pytest -q -m integration --os-base-url http://localhost:9200
 ```
 
+## 准确率与稳定性评测（网络运维）
+生成 benchmark 数据集（业务黄金集 + 本地回归集）：
+```bash
+python scripts/build_network_ops_benchmark_datasets.py
+```
+
+评测业务黄金集（看当前能力准确率）：
+```bash
+python scripts/eval_network_ops_benchmark.py \
+  --dataset benchmark/network_ops_business_golden_v1.json \
+  --profile local_fallback \
+  --repeat 3 \
+  --report-file benchmark/report_business_local.json
+```
+
+评测本地回归集（卡稳定性回归）：
+```bash
+python scripts/eval_network_ops_benchmark.py \
+  --dataset benchmark/network_ops_regression_local_fallback_v1.json \
+  --profile local_fallback \
+  --repeat 3 \
+  --min-accuracy 1.0 \
+  --min-stability 1.0
+```
+
 ## 指导文档
 - 生产使用与规则设计指南：[docs/PRODUCTION_GUIDE.md](docs/PRODUCTION_GUIDE.md)
 - seed_case 字段规范与导入指南：[docs/SEED_CASE_SPEC.md](docs/SEED_CASE_SPEC.md)
+- 检索后端切换（ES 当前 / OS 下一版）：`docs/PRODUCTION_GUIDE.md` 的 `2.2` 小节

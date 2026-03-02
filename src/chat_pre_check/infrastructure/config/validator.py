@@ -105,6 +105,11 @@ def _validate_vector(vector: dict[str, Any]) -> None:
         or vector["seed_case_topk"] <= 0
     ):
         raise ValueError("scene_topk/template_topk/seed_case_topk must be positive")
+    search_backend = vector.get("search_backend", "opensearch")
+    if str(search_backend).lower() not in {"opensearch", "elasticsearch", "es"}:
+        raise ValueError(
+            "vector.search_backend must be one of: opensearch, elasticsearch, es"
+        )
     fusion = vector.get("fusion_weights", {})
     for key in ("scene", "template"):
         if key not in fusion:
