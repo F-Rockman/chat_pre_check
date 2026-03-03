@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends
+from fastapi.concurrency import run_in_threadpool
 
 from chat_pre_check.domain.models import RouteRequest
 from chat_pre_check.interfaces.api.dto import RouteRequestDTO, RouteResponseDTO
@@ -18,14 +19,16 @@ def get_router(engine_provider) -> APIRouter:
         payload: RouteRequestDTO,
         engine=Depends(engine_provider),
     ) -> RouteResponseDTO:
-        decision = engine.route(
+        # Run sync routing pipeline in threadpool to avoid blocking event loop.
+        decision = await run_in_threadpool(
+            engine.route,
             RouteRequest(
                 input_text=payload.input_text,
                 context=payload.context,
                 tenant_id=payload.tenant_id,
                 role=payload.role,
                 trace_level=payload.trace_level,
-            )
+            ),
         )
         return RouteResponseDTO.model_validate(decision.to_dict())
 

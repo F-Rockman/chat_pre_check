@@ -20,45 +20,53 @@ class RecommendationService:
     def refuse_options(
         self, ctx: RequestContext, reason: OutOfScopeReason, limit: int = 4
     ) -> list[ActionOption]:
+        scene_id = ctx.scene or ctx.context_scene
         options: list[ActionOption] = []
-        for template in self.templates:
-            examples = template.get("examples", [])
-            if not examples:
-                continue
-            options.append(
-                ActionOption(
-                    label=examples[0],
-                    intent=template.get("scene_id"),
-                    preset_slots={},
-                    need_followup_slots=[],
+
+        if reason == OutOfScopeReason.POLICY_BLOCKED:
+            options.extend(self._template_options(scene_id=None, limit=2))
+            options.append(ActionOption(label="我能查什么？", intent="capability.list"))
+            return self._dedup_options(options, limit=limit)
+
+        if reason == OutOfScopeReason.PERMISSION_DENIED:
+            options.extend(
+                self._template_options(
+                    scene_id=scene_id,
+                    limit=3,
+                    blocked_keywords=["财务", "利润", "薪资"],
                 )
             )
-            if len(options) >= limit:
-                return options
-
-        for case in self.cases:
-            actions = case.get("recommended_actions", [])
-            for action in actions:
-                options.append(
-                    ActionOption(
-                        label=action.get("label", "查看可用能力"),
-                        intent=action.get("intent"),
-                        preset_slots=action.get("preset_slots", {}),
-                        need_followup_slots=action.get("need_followup_slots", []),
-                    )
+            options.extend(
+                self._case_action_options(
+                    scene_id=scene_id,
+                    limit=2,
+                    blocked_keywords=["财务", "利润", "薪资"],
                 )
-                if len(options) >= limit:
-                    return options
-
-        options.append(
-            ActionOption(
-                label="我能查什么？",
-                intent="capability.list",
-                preset_slots={},
-                need_followup_slots=[],
             )
-        )
-        return options[:limit]
+            options.append(ActionOption(label="我能查什么？", intent="capability.list"))
+            return self._dedup_options(options, limit=limit)
+
+        if reason == OutOfScopeReason.OUT_OF_SEED_SCOPE:
+            options.extend(self._template_options(scene_id=scene_id, limit=3))
+            options.extend(self._case_action_options(scene_id=scene_id, limit=2))
+            options.append(ActionOption(label="查看能力边界", intent="capability.list"))
+            return self._dedup_options(options, limit=limit)
+
+        if reason == OutOfScopeReason.DATA_UNAVAILABLE:
+            options.append(ActionOption(label="稍后重试", intent=None))
+            options.extend(self._template_options(scene_id=scene_id, limit=3))
+            return self._dedup_options(options, limit=limit)
+
+        if reason == OutOfScopeReason.UNKNOWN_DOMAIN:
+            options.append(ActionOption(label="我能查什么？", intent="capability.list"))
+            options.extend(self._template_options(scene_id=None, limit=3))
+            return self._dedup_options(options, limit=limit)
+
+        # UNSUPPORTED_DOMAIN and fallback path.
+        options.extend(self._template_options(scene_id=scene_id, limit=3))
+        options.extend(self._case_action_options(scene_id=scene_id, limit=2))
+        options.append(ActionOption(label="我能查什么？", intent="capability.list"))
+        return self._dedup_options(options, limit=limit)
 
     def scoped_refuse_options(
         self,
@@ -199,3 +207,98 @@ class RecommendationService:
                 )
             )
         return options
+
+    def _template_options(
+        self,
+        *,
+        scene_id: str | None,
+        limit: int,
+        blocked_keywords: list[str] | None = None,
+    ) -> list[ActionOption]:
+        blocked = [item.lower() for item in (blocked_keywords or [])]
+        ordered_templates = sorted(
+            self.templates,
+            key=lambda item: (
+                0
+                if scene_id and str(item.get("scene_id", "")).strip() == scene_id
+                else 1
+            ),
+        )
+        options: list[ActionOption] = []
+        for template in ordered_templates:
+            examples = template.get("examples", [])
+            if not examples:
+                continue
+            label = str(examples[0]).strip()
+            if not label:
+                continue
+            lowered = label.lower()
+            if blocked and any(token in lowered for token in blocked):
+                continue
+            options.append(
+                ActionOption(
+                    label=label,
+                    intent=template.get("scene_id"),
+                    preset_slots={},
+                    need_followup_slots=[],
+                )
+            )
+            if len(options) >= limit:
+                break
+        return options
+
+    def _case_action_options(
+        self,
+        *,
+        scene_id: str | None,
+        limit: int,
+        blocked_keywords: list[str] | None = None,
+    ) -> list[ActionOption]:
+        blocked = [item.lower() for item in (blocked_keywords or [])]
+        ordered_cases = sorted(
+            self.cases,
+            key=lambda item: (
+                0 if scene_id and str(item.get("scene_id", "")).strip() == scene_id else 1
+            ),
+        )
+        options: list[ActionOption] = []
+        for case in ordered_cases:
+            actions = case.get("recommended_actions", [])
+            if not isinstance(actions, list):
+                continue
+            for action in actions:
+                if not isinstance(action, dict):
+                    continue
+                label = str(action.get("label", "查看可用能力")).strip()
+                if not label:
+                    continue
+                lowered = label.lower()
+                if blocked and any(token in lowered for token in blocked):
+                    continue
+                options.append(
+                    ActionOption(
+                        label=label,
+                        intent=action.get("intent"),
+                        preset_slots=action.get("preset_slots", {}),
+                        need_followup_slots=action.get("need_followup_slots", []),
+                    )
+                )
+                if len(options) >= limit:
+                    return options
+        return options
+
+    @staticmethod
+    def _dedup_options(options: list[ActionOption], *, limit: int) -> list[ActionOption]:
+        deduped: list[ActionOption] = []
+        seen: set[tuple[str, str | None, str | None]] = set()
+        for option in options:
+            key = (option.label, option.intent, str(option.slot_value))
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(option)
+            if len(deduped) >= limit:
+                break
+        if deduped:
+            return deduped
+        return [ActionOption(label="我能查什么？", intent="capability.list")]

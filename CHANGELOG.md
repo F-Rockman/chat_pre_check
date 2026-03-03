@@ -37,8 +37,15 @@
 
 ### Runtime
 - Local fallback runtime now consumes `config.seed_cases` from unified capabilities config.
+- API route now executes sync engine logic via FastAPI threadpool (`run_in_threadpool`) to avoid event-loop blocking.
+- Reordered middleware so `seed_scope_guard` is enforced only before NL2SQL fallback (after template matching).
+- Added retriever query-vector LRU cache to reuse embeddings across scene/template/seed retrieval in same query text path.
 
 ### Docs
 - Updated README and guides to reflect unified config model and new import/export paths.
 - Unified wording from OpenSearch-only to generic search backend (ES/OS) where applicable.
 - Replaced machine-local absolute doc links with repository-relative paths.
+- Reorganized docs into two primary Chinese guides:
+  - `docs/CAPABILITIES_GUIDE.md` (full field-level design for `capabilities.json`)
+  - `docs/DEPLOYMENT_AND_ARCHITECTURE_GUIDE.md` (deployment + backend switch + runtime flow)
+- Removed fragmented legacy guides to reduce maintenance complexity.

@@ -50,7 +50,7 @@ python main.py --mode live --os-url http://localhost:9200 --demo-set all
 
 ## 核心能力
 - 洋葱架构：`domain -> application -> infrastructure -> interfaces`
-- 决策链路：`Normalize -> Extract -> Prefill(AC) -> Enrich -> Policy -> Scope -> Scene -> SeedGuard -> Clarify -> Template -> NL2SQL`
+- 决策链路：`Normalize -> Extract -> Prefill(AC) -> Enrich -> Policy -> Scope -> Scene -> Clarify -> Template -> SeedGuard -> NL2SQL`
 - 规则 + 向量融合（`intfloat/multilingual-e5-base` + ES/OS 检索后端）
 - FastAPI 接口：`POST /v1/precheck/route`
 - 20 条验收样例（拒答、追问、模板命中、NL2SQL 分流）
@@ -91,7 +91,7 @@ python scripts/export_ac_terms.py \
 - 守卫开关：`configs/vector.json -> seed_scope_guard.enabled`
 - 统一能力定义：`configs/capabilities.json`
 
-## seed_case 批量导入
+## intents 批量导入（seed 来源）
 ```bash
 python scripts/import_seed_cases.py \
   --input templates/seed_cases_template.csv \
@@ -137,8 +137,6 @@ python scripts/eval_network_ops_benchmark.py \
 ```
 
 ## 指导文档
-- 生产使用与规则设计指南：[docs/PRODUCTION_GUIDE.md](docs/PRODUCTION_GUIDE.md)
-- seed_case 字段规范与导入指南：[docs/SEED_CASE_SPEC.md](docs/SEED_CASE_SPEC.md)
-- 检索后端切换（ES 当前 / OS 下一版）：`docs/PRODUCTION_GUIDE.md` 的 `2.2` 小节
-- 检索后端双栈开发指南：[docs/SEARCH_BACKEND_ARCHITECTURE_GUIDE.md](docs/SEARCH_BACKEND_ARCHITECTURE_GUIDE.md)
+- capabilities 配置字段与业务建模指南：[docs/CAPABILITIES_GUIDE.md](docs/CAPABILITIES_GUIDE.md)
+- 部署、后端切换与链路架构指南：[docs/DEPLOYMENT_AND_ARCHITECTURE_GUIDE.md](docs/DEPLOYMENT_AND_ARCHITECTURE_GUIDE.md)
 - 版本变更记录：[CHANGELOG.md](CHANGELOG.md)

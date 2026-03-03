@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections import OrderedDict
+from threading import Lock
 from typing import Any
 
 from chat_pre_check.domain.interfaces import Embedder
@@ -15,6 +17,7 @@ class OpenSearchVectorRetriever:
         template_index: str,
         seed_case_index: str | None = None,
         fusion_alpha: float = 0.7,
+        query_vector_cache_size: int = 1024,
     ) -> None:
         self.client = client
         self.embedder = embedder
@@ -22,9 +25,12 @@ class OpenSearchVectorRetriever:
         self.template_index = template_index
         self.seed_case_index = seed_case_index
         self.fusion_alpha = fusion_alpha
+        self.query_vector_cache_size = max(1, int(query_vector_cache_size))
+        self._query_vector_cache: OrderedDict[str, list[float]] = OrderedDict()
+        self._cache_lock = Lock()
 
     def search_scene(self, query_text: str, topk: int = 5) -> list[SearchHit]:
-        query_vector = self.embedder.encode_queries([query_text])[0].tolist()
+        query_vector = self._query_vector(query_text)
         vector_hits = self.client.knn_search(
             index_name=self.scene_index,
             vector=query_vector,
@@ -38,7 +44,7 @@ class OpenSearchVectorRetriever:
         return self._fuse_hits(vector_hits, text_hits)
 
     def search_template(self, scene_id: str, query_text: str, topk: int = 5) -> list[SearchHit]:
-        query_vector = self.embedder.encode_queries([query_text])[0].tolist()
+        query_vector = self._query_vector(query_text)
         filters = [{"term": {"scene_id": scene_id}}]
         vector_hits = self.client.knn_search(
             index_name=self.template_index,
@@ -57,7 +63,7 @@ class OpenSearchVectorRetriever:
     def search_seed_cases(self, query_text: str, topk: int = 5) -> list[SearchHit]:
         if not self.seed_case_index:
             return []
-        query_vector = self.embedder.encode_queries([query_text])[0].tolist()
+        query_vector = self._query_vector(query_text)
         vector_hits = self.client.knn_search(
             index_name=self.seed_case_index,
             vector=query_vector,
@@ -106,3 +112,19 @@ class OpenSearchVectorRetriever:
 
         merged.sort(key=lambda item: item.score, reverse=True)
         return merged
+
+    def _query_vector(self, query_text: str) -> list[float]:
+        key = str(query_text)
+        with self._cache_lock:
+            cached = self._query_vector_cache.get(key)
+            if cached is not None:
+                self._query_vector_cache.move_to_end(key)
+                return list(cached)
+
+        vector = self.embedder.encode_queries([query_text])[0].tolist()
+        with self._cache_lock:
+            self._query_vector_cache[key] = vector
+            self._query_vector_cache.move_to_end(key)
+            while len(self._query_vector_cache) > self.query_vector_cache_size:
+                self._query_vector_cache.popitem(last=False)
+        return list(vector)

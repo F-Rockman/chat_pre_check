@@ -278,6 +278,8 @@ def _validate_vector(vector: dict[str, Any]) -> None:
         or vector["seed_case_topk"] <= 0
     ):
         raise ValueError("scene_topk/template_topk/seed_case_topk must be positive")
+    if "query_vector_cache_size" in vector and int(vector["query_vector_cache_size"]) < 1:
+        raise ValueError("query_vector_cache_size must be >= 1")
     search_backend = vector.get("search_backend", "opensearch")
     if str(search_backend).lower() not in {"opensearch", "elasticsearch", "es"}:
         raise ValueError(

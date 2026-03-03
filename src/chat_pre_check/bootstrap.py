@@ -125,6 +125,7 @@ def build_engine(
                 scene_index=vector_cfg["scene_index"],
                 template_index=vector_cfg["template_index"],
                 seed_case_index=vector_cfg.get("seed_case_index"),
+                query_vector_cache_size=int(vector_cfg.get("query_vector_cache_size", 1024)),
             )
             device_resolver = device_resolver or DeviceResolver(
                 client=client,
@@ -187,11 +188,6 @@ def build_engine(
                 scene_topk=int(vector_cfg.get("scene_topk", 5)),
             ),
             SceneRouterMiddleware(scene_repository=scene_repo),
-            SeedScopeGuardMiddleware(
-                retriever=retriever,
-                recommendation_service=recommendation_service,
-                guard_config=vector_cfg.get("seed_scope_guard", {}),
-            ),
             SlotClarifierMiddleware(
                 scene_repository=scene_repo,
                 recommendation_service=recommendation_service,
@@ -204,6 +200,12 @@ def build_engine(
                 threshold=thresholds["T_template"],
                 fusion_weights=template_weights,
                 template_topk=int(vector_cfg.get("template_topk", 5)),
+            ),
+            # Only enforce seed scope when request is about to fallback to NL2SQL.
+            SeedScopeGuardMiddleware(
+                retriever=retriever,
+                recommendation_service=recommendation_service,
+                guard_config=vector_cfg.get("seed_scope_guard", {}),
             ),
             NL2SQLRouterMiddleware(),
         ]
