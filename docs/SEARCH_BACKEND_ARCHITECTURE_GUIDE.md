@@ -50,7 +50,7 @@
 | `livemain.py` | 运维/联调入口 | 统一后端探活与索引存在性检查 |
 | `scripts/build_vector_indices.py` | 索引构建 | 支持 `--search-backend`，按后端建索引并写入 |
 | `scripts/export_ac_terms.py` | AC 词表导出 | 从设备/地域索引导出词条并生成 `ac_terms.json` |
-| `configs/capabilities.json` | 统一能力定义 | 合并 scene/template/seed_case/recommendation/slot_policy |
+| `configs/capabilities.json` | 统一能力定义 | `capability.intents` 统一定义（seed + optional template） |
 | `configs/vector.json` | 配置默认值 | `search_backend` 默认配置 |
 | `validator.py` | 配置校验 | 校验 `search_backend` 可选值合法性 |
 
@@ -223,7 +223,7 @@
 ```
 
 `configs/capabilities.json`：
-- 单一业务配置源：`capability -> scope/slots/templates/seed_cases/recommendations/slot_policy`
+- 单一业务配置源：`capability -> scope/slots/intents/recommendations/slot_policy`
 - 运行期由 loader 编译为 `scenes/templates/cases/seed_cases/slot_policies`
 
 `configs/ac_terms.json`（可由服务数据库导出）：

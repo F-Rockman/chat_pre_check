@@ -154,7 +154,7 @@ python livemain.py --search-backend opensearch --os-url http://<os-host>:9200
 
 ## 4. 配置模型（核心）
 配置目录：
-- `configs/capabilities.json`（统一能力定义：scene/template/seed_case/recommendation/slot_policy）
+- `configs/capabilities.json`（统一能力定义：`capability.intents` 可同时承载 seed + template）
 - `configs/rules.json`
 - `configs/thresholds.json`
 - `configs/vector.json`（含 `search_backend` 开关：`opensearch` / `elasticsearch`）
@@ -178,14 +178,15 @@ seed_case 批量导入与字段规范见：
 - 通过 `slots.defaults` 减少追问轮次（如 `time_range=last_24h`）。
 - `slots.conditional` 用于意图触发型必填（如 `intent=trend` 时必须有 `device_id`）。
 
-### 4.2 Template（模板）
-每个 `capability.templates[*]` 定义“稳定可控查询”。
+### 4.2 Intent / Template（统一定义）
+每个 `capability.intents[*]` 是一个“可检索 seed case”，可选挂载 `template`（稳定可控查询）。
 
 关键字段：
-- `template_id`（`scene_id` 由父 `capability_id` 在编译期注入）
-- `keywords`, `negative_keywords`
-- `slot_schema.required/optional`
-- `examples`, `enabled`
+- intent 基础：`case_id`, `label`, `text`, `enabled`
+- 模板扩展（可选）：`template.template_id`
+- 模板规则：`template.keywords`, `template.negative_keywords`
+- 槽位约束：`template.slot_schema.required/optional`
+- 示例：`template.examples`（可回退到 intent `examples`）
 
 实践建议：
 - `negative_keywords` 必须覆盖容易误命中的反例词（如“相关性”“同比”）。

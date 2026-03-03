@@ -26,6 +26,10 @@
 ### Seed / Template Model
 - Consolidated seed cases, recommendations, slot policies, and optional templates under each capability definition.
 - Updated seed import script to write back into `capabilities.json` instead of a separate seed file.
+- Added unified `capability.intents` model:
+  - one intent defines seed-case retrieval fields
+  - optional embedded `template` defines executable template fields
+  - loader compiles intents into runtime `seed_cases/templates` views
 
 ### Scripts
 - `scripts/build_vector_indices.py` now reads seed cases from loaded capabilities config (`config.seed_cases`) instead of standalone `seed_cases.json`.

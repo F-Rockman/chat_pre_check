@@ -85,6 +85,8 @@ def build_seed_case_docs(seed_cases: list[dict[str, Any]], embedder: E5Embedder)
             "owner": case.get("owner", ""),
             "risk_level": case.get("risk_level", "medium"),
         }
+        if case.get("template_id"):
+            metadata["template_id"] = case.get("template_id")
         docs.append(
             {
                 "id": case["case_id"],

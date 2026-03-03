@@ -101,6 +101,7 @@ python scripts/import_seed_cases.py \
   --merge-mode upsert \
   --on-duplicate keep_last
 ```
+导入结果会写入 `configs/capabilities.json -> capability.intents`（统一定义，运行期自动编译出 `seed_cases/templates` 视图）。
 
 ## 测试
 ```bash

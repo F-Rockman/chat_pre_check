@@ -104,6 +104,19 @@ def _compile_capabilities(
             }
         )
 
+        (
+            intent_templates,
+            intent_seed_cases,
+            intent_template_ids,
+            intent_seed_case_ids,
+        ) = _compile_capability_intents(
+            capability_id=capability_id,
+            enabled=enabled,
+            intents=cap.get("intents"),
+        )
+        templates.extend(intent_templates)
+        seed_cases.extend(intent_seed_cases)
+
         template_list = cap.get("templates", [])
         if isinstance(template_list, list):
             for tpl in template_list:
@@ -112,11 +125,14 @@ def _compile_capabilities(
                 template_id = str(tpl.get("template_id", "")).strip()
                 if not template_id:
                     continue
+                if template_id in intent_template_ids:
+                    continue
                 template_item = dict(tpl)
                 template_item["scene_id"] = capability_id
                 template_item.setdefault("slot_schema", {})
                 template_item.setdefault("examples", [])
                 template_item.setdefault("keywords", [])
+                template_item.setdefault("negative_keywords", [])
                 template_item.setdefault("enabled", enabled)
                 templates.append(template_item)
 
@@ -143,6 +159,8 @@ def _compile_capabilities(
                 seed_case_id = str(seed.get("case_id", "")).strip()
                 if not seed_case_id:
                     continue
+                if seed_case_id in intent_seed_case_ids:
+                    continue
                 item = dict(seed)
                 item["case_id"] = seed_case_id
                 item["scene_id"] = capability_id
@@ -167,6 +185,122 @@ def _compile_capabilities(
     return scenes, templates, cases, seed_cases, slot_policies
 
 
+def _compile_capability_intents(
+    *,
+    capability_id: str,
+    enabled: bool,
+    intents: Any,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], set[str], set[str]]:
+    if not isinstance(intents, list):
+        return [], [], set(), set()
+    compiled_templates: list[dict[str, Any]] = []
+    compiled_seed_cases: list[dict[str, Any]] = []
+    template_ids: set[str] = set()
+    seed_case_ids: set[str] = set()
+    for intent in intents:
+        if not isinstance(intent, dict):
+            continue
+        case_id = str(intent.get("case_id", "")).strip()
+        if not case_id:
+            continue
+
+        seed_item = _normalize_intent_seed_item(
+            intent=intent,
+            capability_id=capability_id,
+            enabled=enabled,
+        )
+        if seed_item:
+            compiled_seed_cases.append(seed_item)
+            seed_case_ids.add(case_id)
+
+        template_item = _normalize_intent_template_item(
+            intent=intent,
+            capability_id=capability_id,
+            enabled=enabled,
+        )
+        if template_item:
+            compiled_templates.append(template_item)
+            template_ids.add(template_item["template_id"])
+    return compiled_templates, compiled_seed_cases, template_ids, seed_case_ids
+
+
+def _normalize_intent_seed_item(
+    *,
+    intent: dict[str, Any],
+    capability_id: str,
+    enabled: bool,
+) -> dict[str, Any] | None:
+    case_id = str(intent.get("case_id", "")).strip()
+    if not case_id:
+        return None
+    label = str(intent.get("label", "")).strip()
+    text = str(intent.get("text", "")).strip()
+    if not text:
+        examples = _to_str_list(intent.get("examples"))
+        if examples:
+            text = examples[0]
+    if not text:
+        text = label or case_id
+
+    template = _to_dict(intent.get("template"))
+    template_id = str(template.get("template_id") or intent.get("template_id", "")).strip()
+    route_type = str(intent.get("route_type", "")).strip()
+    if not route_type:
+        route_type = "route_template" if template_id else "route_nl2sql"
+
+    item = {
+        "case_id": case_id,
+        "scene_id": capability_id,
+        "label": label or text,
+        "text": text,
+        "route_type": route_type,
+        "tags": _to_str_list(intent.get("tags")),
+        "priority": _to_int(intent.get("priority"), 100),
+        "owner": str(intent.get("owner", "")).strip(),
+        "risk_level": str(intent.get("risk_level", "medium")).strip() or "medium",
+        "enabled": bool(intent.get("enabled", enabled)),
+    }
+    if template_id:
+        item["template_id"] = template_id
+    slots = intent.get("slots")
+    if isinstance(slots, dict):
+        item["slots"] = slots
+    return item
+
+
+def _normalize_intent_template_item(
+    *,
+    intent: dict[str, Any],
+    capability_id: str,
+    enabled: bool,
+) -> dict[str, Any] | None:
+    template = _to_dict(intent.get("template"))
+    template_id = str(template.get("template_id") or intent.get("template_id", "")).strip()
+    if not template_id:
+        return None
+
+    slot_schema = _to_dict(template.get("slot_schema"))
+    if not slot_schema:
+        slot_schema = _to_dict(intent.get("slot_schema"))
+    template_item = {
+        "template_id": template_id,
+        "scene_id": capability_id,
+        "slot_schema": {
+            "required": _to_str_list(slot_schema.get("required")),
+            "optional": _to_str_list(slot_schema.get("optional")),
+        },
+        "examples": _to_str_list(template.get("examples")) or _to_str_list(intent.get("examples")),
+        "keywords": _to_str_list(template.get("keywords")) or _to_str_list(intent.get("keywords")),
+        "negative_keywords": _to_str_list(template.get("negative_keywords"))
+        or _to_str_list(intent.get("negative_keywords")),
+        "enabled": bool(template.get("enabled", intent.get("enabled", enabled))),
+    }
+    case_id = str(intent.get("case_id", "")).strip()
+    if case_id:
+        template_item["case_id_ref"] = case_id
+    return template_item
+
+
 def _to_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
@@ -181,3 +315,10 @@ def _to_list_of_dict(value: Any) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
     return [item for item in value if isinstance(item, dict)]
+
+
+def _to_int(value: Any, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default

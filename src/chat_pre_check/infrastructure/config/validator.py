@@ -84,6 +84,10 @@ def _validate_capabilities(capabilities: list[dict[str, Any]]) -> None:
         seed_cases = cap.get("seed_cases", [])
         if seed_cases is not None and not isinstance(seed_cases, list):
             raise ValueError(f"Capability seed_cases must be list: {capability_id}")
+        intents = cap.get("intents", [])
+        if intents is not None and not isinstance(intents, list):
+            raise ValueError(f"Capability intents must be list: {capability_id}")
+        _validate_capability_intents(capability_id, intents)
         slot_policy = cap.get("slot_policy", {})
         if slot_policy is not None and not isinstance(slot_policy, dict):
             raise ValueError(f"Capability slot_policy must be object: {capability_id}")
@@ -147,6 +151,107 @@ def _validate_seed_cases(seed_cases: list[dict[str, Any]], scenes: list[dict[str
         text = str(case.get("text", "")).strip()
         if len(text) < 2:
             raise ValueError(f"Seed case text too short: {case_id}")
+
+
+def _validate_capability_intents(capability_id: str, intents: Any) -> None:
+    if intents in (None, []):
+        return
+    if not isinstance(intents, list):
+        raise ValueError(f"Capability intents must be list: {capability_id}")
+    seen_case_ids: set[str] = set()
+    seen_template_ids: set[str] = set()
+    for idx, intent in enumerate(intents, start=1):
+        if not isinstance(intent, dict):
+            raise ValueError(f"Capability intent item must be object: {capability_id}[{idx}]")
+
+        case_id = str(intent.get("case_id", "")).strip()
+        if not case_id:
+            raise ValueError(f"Capability intent missing case_id: {capability_id}[{idx}]")
+        if case_id in seen_case_ids:
+            raise ValueError(f"Duplicate intent case_id in capability: {capability_id}.{case_id}")
+        seen_case_ids.add(case_id)
+
+        text = str(intent.get("text", "")).strip()
+        label = str(intent.get("label", "")).strip()
+        examples = intent.get("examples", [])
+        if examples is not None and not isinstance(examples, list):
+            raise ValueError(f"Capability intent examples must be list: {capability_id}.{case_id}")
+        has_examples = isinstance(examples, list) and any(str(item).strip() for item in examples)
+        if not text and not label and not has_examples:
+            raise ValueError(f"Capability intent needs text/label/examples: {capability_id}.{case_id}")
+        if text and len(text) < 2:
+            raise ValueError(f"Capability intent text too short: {capability_id}.{case_id}")
+
+        if "keywords" in intent and not isinstance(intent["keywords"], list):
+            raise ValueError(f"Capability intent keywords must be list: {capability_id}.{case_id}")
+        if "examples" in intent and not isinstance(intent["examples"], list):
+            raise ValueError(f"Capability intent examples must be list: {capability_id}.{case_id}")
+        if "negative_keywords" in intent and not isinstance(intent["negative_keywords"], list):
+            raise ValueError(
+                f"Capability intent negative_keywords must be list: {capability_id}.{case_id}"
+            )
+        if "enabled" in intent and not isinstance(intent["enabled"], bool):
+            raise ValueError(f"Capability intent enabled must be bool: {capability_id}.{case_id}")
+        if "tags" in intent and not isinstance(intent["tags"], list):
+            raise ValueError(f"Capability intent tags must be list: {capability_id}.{case_id}")
+        if "slots" in intent and not isinstance(intent["slots"], dict):
+            raise ValueError(f"Capability intent slots must be object: {capability_id}.{case_id}")
+
+        template = intent.get("template")
+        root_template_id = str(intent.get("template_id", "")).strip()
+        if template is not None and not isinstance(template, dict):
+            raise ValueError(f"Capability intent template must be object: {capability_id}.{case_id}")
+
+        if isinstance(template, dict):
+            _validate_intent_template(
+                capability_id=capability_id,
+                case_id=case_id,
+                template=template,
+                seen_template_ids=seen_template_ids,
+            )
+        elif root_template_id:
+            _validate_intent_template(
+                capability_id=capability_id,
+                case_id=case_id,
+                template={
+                    "template_id": root_template_id,
+                    "slot_schema": intent.get("slot_schema", {}),
+                },
+                seen_template_ids=seen_template_ids,
+            )
+
+
+def _validate_intent_template(
+    *,
+    capability_id: str,
+    case_id: str,
+    template: dict[str, Any],
+    seen_template_ids: set[str],
+) -> None:
+    template_id = str(template.get("template_id", "")).strip()
+    if not template_id:
+        raise ValueError(
+            f"Capability intent template_id must not be empty: {capability_id}.{case_id}"
+        )
+    if template_id in seen_template_ids:
+        raise ValueError(f"Duplicate intent template_id in capability: {capability_id}.{template_id}")
+    seen_template_ids.add(template_id)
+
+    slot_schema = template.get("slot_schema", {})
+    if not isinstance(slot_schema, dict):
+        raise ValueError(
+            f"Capability intent template slot_schema must be object: {capability_id}.{case_id}"
+        )
+    required = slot_schema.get("required", [])
+    optional = slot_schema.get("optional", [])
+    if not isinstance(required, list):
+        raise ValueError(
+            f"Capability intent template slot_schema.required must be list: {capability_id}.{case_id}"
+        )
+    if not isinstance(optional, list):
+        raise ValueError(
+            f"Capability intent template slot_schema.optional must be list: {capability_id}.{case_id}"
+        )
 
 
 def _validate_thresholds(thresholds: dict[str, float]) -> None:

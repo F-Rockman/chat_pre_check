@@ -93,7 +93,8 @@ python scripts/import_seed_cases.py \
 
 ## 7. 生产发布流程建议
 1. 业务同学在 CSV/JSONL 模板填充
-2. 导入脚本写入 `configs/capabilities.json` 中对应 `capability.seed_cases`
+2. 导入脚本写入 `configs/capabilities.json` 中对应 `capability.intents`
+   - 一个 intent 可选挂载 `template`，用于模板路由
    - 不再维护独立 `configs/seed_cases.json`
 3. 向量索引构建：
 ```bash

@@ -15,7 +15,7 @@ from chat_pre_check.infrastructure.seed_cases import (
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Import seed cases from CSV/JSON/JSONL into configs/capabilities.json"
+        description="Import seed cases from CSV/JSON/JSONL into capability intents in configs/capabilities.json"
     )
     parser.add_argument("--input", required=True, help="Input file path (.csv/.json/.jsonl)")
     parser.add_argument("--input-format", default="auto", choices=["auto", "csv", "json", "jsonl"])
@@ -112,22 +112,47 @@ def _apply_seed_cases_to_capabilities(
             continue
         capability_id = str(capability.get("capability_id", "")).strip()
         cases = grouped.get(capability_id, [])
+        existing_intents = capability.get("intents", [])
+        intent_by_case_id: dict[str, dict[str, Any]] = {}
+        if isinstance(existing_intents, list):
+            for intent in existing_intents:
+                if not isinstance(intent, dict):
+                    continue
+                case_id = str(intent.get("case_id", "")).strip()
+                if case_id:
+                    intent_by_case_id[case_id] = intent
+
         normalized: list[dict[str, Any]] = []
         for case in cases:
-            normalized.append(
-                {
-                    "case_id": case.get("case_id"),
-                    "label": case.get("label"),
-                    "text": case.get("text"),
-                    "route_type": case.get("route_type", "route_nl2sql"),
-                    "tags": case.get("tags", []),
-                    "priority": case.get("priority", 100),
-                    "owner": case.get("owner", ""),
-                    "risk_level": case.get("risk_level", "medium"),
-                    "enabled": case.get("enabled", True),
+            case_id = str(case.get("case_id", "")).strip()
+            if not case_id:
+                continue
+            existing_intent = intent_by_case_id.get(case_id, {})
+            intent_item = {
+                "case_id": case_id,
+                "label": case.get("label"),
+                "text": case.get("text"),
+                "route_type": case.get("route_type", "route_nl2sql"),
+                "tags": case.get("tags", []),
+                "priority": case.get("priority", 100),
+                "owner": case.get("owner", ""),
+                "risk_level": case.get("risk_level", "medium"),
+                "enabled": case.get("enabled", True),
+            }
+            if isinstance(existing_intent.get("template"), dict):
+                intent_item["template"] = existing_intent["template"]
+            elif existing_intent.get("template_id"):
+                intent_item["template"] = {
+                    "template_id": existing_intent.get("template_id"),
+                    "slot_schema": existing_intent.get("slot_schema", {}),
+                    "keywords": existing_intent.get("keywords", []),
+                    "negative_keywords": existing_intent.get("negative_keywords", []),
+                    "examples": existing_intent.get("examples", []),
+                    "enabled": existing_intent.get("enabled", True),
                 }
-            )
-        capability["seed_cases"] = normalized
+            normalized.append(intent_item)
+        capability["intents"] = normalized
+        capability.pop("seed_cases", None)
 
 
 if __name__ == "__main__":
