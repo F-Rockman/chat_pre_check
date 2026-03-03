@@ -8,6 +8,7 @@ from chat_pre_check.domain.models import RouteRequest
 
 
 def main() -> None:
+    """CLI 入口：单次输入并输出路由决策 JSON。"""
     parser = argparse.ArgumentParser(description="chat_pre_check CLI")
     parser.add_argument("text", help="User input text")
     parser.add_argument("--config-dir", default="configs")

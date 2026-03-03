@@ -4,6 +4,8 @@ from chat_pre_check.domain.models import Candidate, SearchHit
 
 
 class DemoDeviceResolver:
+    """演示设备解析器：返回固定候选，便于可重复测试。"""
+
     def resolve(self, text: str, topk: int = 5) -> list[Candidate]:
         text = text.lower()
         if "10.2.3.4" in text:
@@ -20,6 +22,8 @@ class DemoDeviceResolver:
 
 
 class DemoRegionResolver:
+    """演示区域解析器：返回固定候选，便于可重复测试。"""
+
     def resolve(self, text: str, topk: int = 5) -> list[Candidate]:
         mapping = {
             "广州": ("region_gz", "广州"),
@@ -38,6 +42,8 @@ class DemoRegionResolver:
 
 
 class DemoVectorRetriever:
+    """演示检索器：用规则模拟 scene/template/seed 召回。"""
+
     def search_scene(self, query_text: str, topk: int = 5) -> list[SearchHit]:
         text = query_text.lower()
         hits: list[SearchHit] = []

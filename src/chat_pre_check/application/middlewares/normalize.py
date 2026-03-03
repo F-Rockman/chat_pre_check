@@ -10,6 +10,7 @@ SPACE_RE = re.compile(r"\s+")
 
 
 def normalize_text(text: str) -> str:
+    """文本归一化：小写化、标点空格化、压缩多余空白。"""
     text = text.strip().lower()
     text = text.replace("，", " ").replace("。", " ").replace("？", " ").replace("！", " ")
     text = SPACE_RE.sub(" ", text)
@@ -17,6 +18,8 @@ def normalize_text(text: str) -> str:
 
 
 class NormalizeMiddleware:
+    """标准化输入文本，写入 `ctx.norm_text`。"""
+
     name = "normalize"
 
     def process(self, ctx: RequestContext) -> RouteDecision | None:

@@ -5,6 +5,8 @@ from typing import Any
 
 
 class ElasticsearchClient:
+    """Elasticsearch 访问封装：索引管理、向量检索、文本检索。"""
+
     def __init__(
         self,
         base_url: str,
@@ -51,6 +53,7 @@ class ElasticsearchClient:
     def ensure_vector_index(self, index_name: str, dimension: int) -> None:
         if self.index_exists(index_name):
             return
+        # ES8 向量索引使用 dense_vector + cosine。
         body = {
             "settings": {
                 "number_of_shards": 1,
@@ -121,7 +124,7 @@ class ElasticsearchClient:
             )
             return response.get("hits", {}).get("hits", [])
         except Exception:
-            # Fallback for clusters without knn query support.
+            # 兼容不支持 knn query 的集群，降级为 script_score。
             fallback = {
                 "size": topk,
                 "query": {
@@ -177,6 +180,7 @@ class ElasticsearchClient:
         return response.get("hits", {}).get("hits", [])
 
     def _with_retry(self, operation: str, fn):
+        # 轻量重试：用于短暂网络抖动和节点过载。
         last_error: Exception | None = None
         for attempt in range(self.max_retries + 1):
             try:

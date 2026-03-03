@@ -17,6 +17,7 @@ _BACKEND_ALIAS = {
 
 
 def normalize_search_backend(search_backend: str | None) -> str:
+    """归一化后端名称，支持 es 别名。"""
     backend = (search_backend or "").strip().lower()
     if backend == "":
         return SEARCH_BACKEND_OPENSEARCH
@@ -34,7 +35,7 @@ def resolve_search_backend(
     *,
     backend_override: str | None = None,
 ) -> str:
-    # Priority: explicit argument > env > config > default.
+    # 优先级：函数参数 > 环境变量 > 配置文件 > 默认值。
     candidate = (
         backend_override
         or os.getenv("CHAT_PRE_CHECK_SEARCH_BACKEND")
@@ -56,6 +57,7 @@ def build_search_client(
     retry_backoff_sec: float = 0.2,
     backend_override: str | None = None,
 ):
+    """按后端类型构建搜索客户端实例。"""
     backend = resolve_search_backend(vector_cfg, backend_override=backend_override)
     if backend == SEARCH_BACKEND_OPENSEARCH:
         client = OpenSearchClient(
@@ -81,5 +83,5 @@ def build_search_client(
         )
         return backend, client
 
-    # Guard for future refactor safety.
+    # 防御性分支，避免未来扩展时静默落空。
     raise ValueError(f"Unsupported search backend: {backend}")

@@ -24,6 +24,7 @@ OPTIONAL_FIELDS = (
 
 @dataclass(slots=True)
 class SeedCaseImportResult:
+    """Seed 导入统计结果。"""
     rows_total: int
     rows_ok: int
     rows_invalid: int
@@ -33,6 +34,7 @@ class SeedCaseImportResult:
 
 
 def load_seed_case_rows(input_path: Path, input_format: str = "auto") -> list[dict[str, Any]]:
+    """从 CSV/JSON/JSONL 读取原始 seed 行。"""
     fmt = detect_format(input_path, input_format)
     if fmt == "csv":
         return _load_csv_rows(input_path)
@@ -44,6 +46,7 @@ def load_seed_case_rows(input_path: Path, input_format: str = "auto") -> list[di
 
 
 def detect_format(input_path: Path, input_format: str) -> str:
+    """检测输入文件格式。"""
     if input_format != "auto":
         return input_format
     suffix = input_path.suffix.lower()
@@ -64,6 +67,7 @@ def import_seed_cases(
     allow_unknown_scene: bool = False,
     on_duplicate: str = "error",
 ) -> tuple[list[dict[str, Any]], SeedCaseImportResult]:
+    """校验并归一化 seed 行，返回可入库结果和统计信息。"""
     errors: list[dict[str, Any]] = []
     normalized: list[dict[str, Any]] = []
     duplicate_count = 0
@@ -104,6 +108,7 @@ def import_seed_cases(
 
 
 def normalize_seed_case_row(row: dict[str, Any]) -> dict[str, Any]:
+    """单行 seed 归一化。"""
     item: dict[str, Any] = {}
     raw = {str(k).strip(): v for k, v in row.items()}
 
@@ -154,6 +159,7 @@ def merge_seed_cases(
     *,
     mode: str = "replace",
 ) -> list[dict[str, Any]]:
+    """按策略合并旧 seed 与新 seed。"""
     if mode == "replace":
         return sorted(incoming, key=lambda x: x["case_id"])
     if mode == "upsert":

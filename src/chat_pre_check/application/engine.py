@@ -10,6 +10,8 @@ from chat_pre_check.domain.models import TraceStep
 
 
 class PrecheckEngine:
+    """路由引擎入口：构造请求上下文，执行中间件流水线并兜底异常。"""
+
     def __init__(
         self,
         pipeline: MiddlewarePipeline,
@@ -24,6 +26,7 @@ class PrecheckEngine:
         ]
 
     def route(self, request: RouteRequest) -> RouteDecision:
+        # 将外部请求字段投影到内部上下文，统一后续链路读取方式。
         ctx = RequestContext(
             input_text=request.input_text,
             tenant_id=request.tenant_id,
@@ -36,6 +39,7 @@ class PrecheckEngine:
         try:
             decision = self.pipeline.run(ctx)
         except Exception as exc:
+            # 任一中间件异常都收敛为可观测的拒答结果，避免直接抛 500。
             elapsed = (time.perf_counter() - started) * 1000
             ctx.trace.add_step(
                 TraceStep(
@@ -54,6 +58,7 @@ class PrecheckEngine:
                 out_of_scope_reason=OutOfScopeReason.DATA_UNAVAILABLE,
             )
         decision.trace = render_trace(ctx.trace, level=request.trace_level)
+        # 补全兜底字段，确保响应结构稳定。
         if not decision.scene:
             decision.scene = ctx.scene
         if not decision.slots:

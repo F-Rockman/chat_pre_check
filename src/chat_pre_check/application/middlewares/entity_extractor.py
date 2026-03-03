@@ -8,6 +8,8 @@ from chat_pre_check.infrastructure.extractors.rule_extractors import extract_ent
 
 
 class EntityExtractorMiddleware:
+    """规则抽取器：从文本抽取时间、指标、协议等轻量实体。"""
+
     name = "entity_extractor"
 
     def __init__(self, default_timezone: str) -> None:
@@ -32,6 +34,7 @@ class EntityExtractorMiddleware:
 
     @staticmethod
     def _merge_slots(ctx: RequestContext, entities: dict[str, Any]) -> None:
+        # 仅写入已识别且非空实体，不覆盖为 None 的值。
         if entities.get("time_range"):
             ctx.slots["time_range"] = entities["time_range"]
         if entities.get("topn") is not None:

@@ -8,6 +8,7 @@ from chat_pre_check.interfaces.api.dto import RouteRequestDTO, RouteResponseDTO
 
 
 def get_router(engine_provider) -> APIRouter:
+    """创建 API 路由，注入引擎提供器以支持测试替换。"""
     router = APIRouter()
 
     @router.get("/healthz")
@@ -19,7 +20,7 @@ def get_router(engine_provider) -> APIRouter:
         payload: RouteRequestDTO,
         engine=Depends(engine_provider),
     ) -> RouteResponseDTO:
-        # Run sync routing pipeline in threadpool to avoid blocking event loop.
+        # 将同步路由链路放入线程池，避免阻塞 FastAPI 事件循环。
         decision = await run_in_threadpool(
             engine.route,
             RouteRequest(

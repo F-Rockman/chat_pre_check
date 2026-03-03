@@ -9,6 +9,8 @@ from chat_pre_check.domain.models import SearchHit
 
 
 class OpenSearchVectorRetriever:
+    """混合检索器：融合向量召回与文本召回。"""
+
     def __init__(
         self,
         client: Any,
@@ -26,6 +28,7 @@ class OpenSearchVectorRetriever:
         self.seed_case_index = seed_case_index
         self.fusion_alpha = fusion_alpha
         self.query_vector_cache_size = max(1, int(query_vector_cache_size))
+        # 查询向量缓存：同一 query 在 scene/template/seed_case 三路检索时只编码一次。
         self._query_vector_cache: OrderedDict[str, list[float]] = OrderedDict()
         self._cache_lock = Lock()
 
@@ -95,6 +98,7 @@ class OpenSearchVectorRetriever:
         for hit in text_hits:
             merge_score(hit, vector_part=False)
 
+        # 先做分路归一化，再按 alpha 线性融合，避免某一路分值尺度主导最终排序。
         vector_max = max((item["vector"] for item in hit_map.values()), default=1.0) or 1.0
         text_max = max((item["text"] for item in hit_map.values()), default=1.0) or 1.0
 
@@ -123,6 +127,7 @@ class OpenSearchVectorRetriever:
 
         vector = self.embedder.encode_queries([query_text])[0].tolist()
         with self._cache_lock:
+            # 使用 OrderedDict 维护轻量 LRU，超过容量时淘汰最久未使用的查询。
             self._query_vector_cache[key] = vector
             self._query_vector_cache.move_to_end(key)
             while len(self._query_vector_cache) > self.query_vector_cache_size:

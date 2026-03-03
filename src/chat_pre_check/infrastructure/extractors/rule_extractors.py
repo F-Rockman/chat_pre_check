@@ -10,6 +10,7 @@ PERCENT_RE = re.compile(r"(?:>|大于|超过)\s*(\d+(?:\.\d+)?)\s*%")
 
 
 def extract_entities(text: str, timezone: str) -> dict[str, Any]:
+    """规则抽取入口：适合高频、稳定、可解释的轻量槽位。"""
     entities: dict[str, Any] = {}
     entities["time_range"] = _extract_time_range(text, timezone)
     entities["topn"] = _extract_topn(text)
@@ -26,6 +27,7 @@ def extract_entities(text: str, timezone: str) -> dict[str, Any]:
 
 
 def _extract_time_range(text: str, timezone: str) -> dict[str, Any] | None:
+    """抽取相对时间范围，统一为 preset 表达。"""
     mapping = {
         "近24小时": "last_24h",
         "24小时": "last_24h",
@@ -50,6 +52,7 @@ def _extract_time_range(text: str, timezone: str) -> dict[str, Any] | None:
 
 
 def _extract_topn(text: str) -> int | None:
+    """抽取 TopN 数值。"""
     match = TOPN_RE.search(text)
     if not match:
         return None
@@ -150,6 +153,7 @@ def _extract_intent(text: str) -> str | None:
 
 
 def _extract_metric(text: str) -> str | None:
+    """抽取常见指标名并映射到标准 metric。"""
     mapping = {
         "丢包率": "packet_loss",
         "丢包": "packet_loss",

@@ -7,6 +7,8 @@ from opensearchpy import OpenSearch
 
 
 class OpenSearchClient:
+    """OpenSearch 访问封装：索引管理、向量检索、文本检索。"""
+
     def __init__(
         self,
         base_url: str,
@@ -48,6 +50,7 @@ class OpenSearchClient:
     def ensure_vector_index(self, index_name: str, dimension: int) -> None:
         if self.index_exists(index_name):
             return
+        # 统一索引映射，向量字段使用 knn_vector。
         body = {
             "settings": {
                 "index": {
@@ -156,6 +159,7 @@ class OpenSearchClient:
         return response.get("hits", {}).get("hits", [])
 
     def _with_retry(self, operation: str, fn):
+        # 轻量重试：用于短暂网络抖动和节点过载。
         last_error: Exception | None = None
         for attempt in range(self.max_retries + 1):
             try:

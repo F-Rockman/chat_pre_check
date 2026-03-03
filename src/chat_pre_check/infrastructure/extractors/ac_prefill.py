@@ -9,6 +9,7 @@ from typing import Any
 from chat_pre_check.domain.models import Candidate
 
 
+# AC 词典中的标准词条定义（来自配置内联或 ac_terms.json）。
 @dataclass(slots=True)
 class PrefillTerm:
     term: str
@@ -75,6 +76,8 @@ class _Pattern:
 
 
 class AhoCorasickAutomaton:
+    """AC 自动机：用于在一段文本中一次扫描完成多关键词匹配。"""
+
     def __init__(
         self,
         *,
@@ -116,6 +119,7 @@ class AhoCorasickAutomaton:
         self._built = False
 
     def build(self) -> None:
+        # BFS 构建 fail 指针，并将失配状态的输出合并到当前状态。
         queue: deque[int] = deque()
         for _, state in self._transitions[0].items():
             self._fail[state] = 0
@@ -142,6 +146,7 @@ class AhoCorasickAutomaton:
         normalized_text = self._normalize(text)
         state = 0
         matches: list[ACMatch] = []
+        # 单次线性扫描：失配时沿 fail 回退，命中时输出对应模式。
         for idx, ch in enumerate(normalized_text):
             while state and ch not in self._transitions[state]:
                 state = self._fail[state]
@@ -181,7 +186,7 @@ class AhoCorasickAutomaton:
     def _resolve_word_boundary(self, term: PrefillTerm) -> bool:
         if term.word_boundary is not None:
             return bool(term.word_boundary)
-        # Chinese terms generally do not rely on ASCII boundaries.
+        # 中文词通常不依赖 ASCII 边界，默认关闭边界约束以提升召回。
         if any(ord(ch) > 127 for ch in term.term):
             return False
         return self.default_word_boundary
@@ -194,6 +199,8 @@ class AhoCorasickAutomaton:
 
 
 class ACSlotPrefiller:
+    """单域 AC 预提参器：负责匹配、去重、排序，并产出候选槽位值。"""
+
     def __init__(
         self,
         terms: list[PrefillTerm],
@@ -221,6 +228,7 @@ class ACSlotPrefiller:
         if not matches:
             return ACPrefillResult(matches=[], slot_matches={}, slot_candidates={})
 
+        # 先按槽位分桶，再用“槽位+值”去重，保留排名更高的命中。
         slot_buckets: dict[str, dict[str, ACMatch]] = {}
         for hit in matches:
             if not hit.slot:
@@ -309,7 +317,7 @@ class ACSlotPrefiller:
     @staticmethod
     def _rank_key(hit: ACMatch) -> tuple[float, int, int]:
         length = hit.end - hit.start + 1
-        # Higher score first, then longer term, then earlier position.
+        # 排序优先级：分数更高 > 词更长 > 位置更靠前。
         return (-float(hit.score), -length, hit.start)
 
     @staticmethod
@@ -340,6 +348,7 @@ def build_slot_prefiller(
     if not bool(cfg.get("enabled", False)):
         return None
 
+    # 支持两种词典来源：配置内联 terms 或 dictionary_file 外部文件。
     raw_terms = _resolve_raw_terms(config_dir=Path(config_dir), prefill_cfg=cfg)
     terms = _parse_prefill_terms(raw_terms)
     if not terms:
@@ -485,6 +494,8 @@ def _to_domain_priority(value: Any) -> dict[str, float]:
 
 
 class ACDomainPrefillManager:
+    """多域预提参管理器：为不同业务域维护独立 AC 实例并统一仲裁结果。"""
+
     def __init__(
         self,
         *,
@@ -610,6 +621,7 @@ class ACDomainPrefillManager:
                 for item in items:
                     key = f"{slot_name}:{item.resolved_slot_value()}"
                     prev = bucket.get(key)
+                    # 跨域冲突时按统一排序键保留更优命中。
                     if prev is None or self._rank_key(item) < self._rank_key(prev):
                         bucket[key] = item
 
@@ -665,4 +677,5 @@ class ACDomainPrefillManager:
         domain = str(item.metadata.get("prefill_domain", ""))
         priority = float(self.domain_priority.get(domain, 0.0))
         length = item.end - item.start + 1
+        # 排序优先级：命中分数 > 域优先级 > 词长 > 位置。
         return (-float(item.score), -priority, -length, item.start)

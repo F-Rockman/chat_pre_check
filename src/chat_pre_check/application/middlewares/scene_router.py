@@ -7,6 +7,8 @@ from chat_pre_check.domain.models import RequestContext, RouteDecision, TraceSte
 
 
 class SceneRouterMiddleware:
+    """场景写入器：将上下文场景回填到当前请求。"""
+
     name = "scene_router"
 
     def __init__(self, scene_repository: SceneRepository) -> None:

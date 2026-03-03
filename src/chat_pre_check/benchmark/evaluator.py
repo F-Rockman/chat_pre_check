@@ -14,6 +14,7 @@ from chat_pre_check.domain.models import RouteRequest
 
 @dataclass(slots=True)
 class BenchmarkCase:
+    """单条评测样本。"""
     case_id: str
     text: str
     expected: dict[str, Any]
@@ -26,6 +27,7 @@ class BenchmarkCase:
 
 @dataclass(slots=True)
 class BenchmarkFailure:
+    """评测失败明细。"""
     case_id: str
     text: str
     expected: dict[str, Any]
@@ -35,6 +37,7 @@ class BenchmarkFailure:
 
 @dataclass(slots=True)
 class BenchmarkSummary:
+    """评测聚合结果。"""
     total: int
     passed: int
     failed: int
@@ -67,6 +70,7 @@ class BenchmarkSummary:
 
 
 def load_benchmark_cases(dataset_path: str | Path) -> list[BenchmarkCase]:
+    """加载 benchmark 数据集并做结构校验。"""
     path = Path(dataset_path)
     rows = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(rows, list):
@@ -117,6 +121,7 @@ def build_benchmark_engine(
     os_url: str | None = None,
     search_backend: str | None = None,
 ):
+    """按 profile 构建评测引擎。"""
     if profile == "local_fallback":
         return build_local_fallback_engine(config_dir=config_dir)
     if profile == "mock":
@@ -145,6 +150,7 @@ def evaluate_benchmark(
     trace_level: str = "compact",
     repeat: int = 3,
 ) -> BenchmarkSummary:
+    """执行评测：统计准确率、稳定性和失败样本。"""
     engine = build_benchmark_engine(
         profile,
         config_dir=config_dir,
@@ -217,6 +223,7 @@ def evaluate_benchmark(
 
 
 def _case_match(expected: dict[str, Any], actual: dict[str, Any]) -> tuple[bool, str]:
+    """判断单样本是否命中预期。"""
     for key, expected_value in expected.items():
         actual_value = actual.get(key)
         if key == "missing_slots":
@@ -233,6 +240,7 @@ def _case_match(expected: dict[str, Any], actual: dict[str, Any]) -> tuple[bool,
 
 
 def _compact_actual(actual: dict[str, Any]) -> dict[str, Any]:
+    """提取失败分析所需的最小字段集合。"""
     return {
         "type": actual.get("type"),
         "scene": actual.get("scene"),
@@ -243,11 +251,13 @@ def _compact_actual(actual: dict[str, Any]) -> dict[str, Any]:
 
 
 def _is_stable(actual_runs: list[dict[str, Any]]) -> bool:
+    """多次重复执行是否完全稳定。"""
     signatures = {_signature(item) for item in actual_runs}
     return len(signatures) == 1
 
 
 def _signature(actual: dict[str, Any]) -> str:
+    """生成用于稳定性比较的签名。"""
     payload = {
         "type": actual.get("type"),
         "scene": actual.get("scene"),

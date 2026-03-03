@@ -6,6 +6,8 @@ import numpy as np
 
 
 class E5Embedder:
+    """E5 向量编码器封装，惰性加载模型。"""
+
     def __init__(self, model_name: str, device: str = "cpu") -> None:
         self.model_name = model_name
         self.device = device
@@ -20,6 +22,7 @@ class E5Embedder:
         return self._model
 
     def encode_queries(self, texts: Sequence[str]) -> np.ndarray:
+        # E5 推荐 query/passsage 双前缀输入格式。
         prefixed = [f"query: {text}" for text in texts]
         return self._encode(prefixed)
 

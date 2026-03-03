@@ -5,6 +5,8 @@ from chat_pre_check.domain.models import RequestContext, RouteDecision
 
 
 class MiddlewarePipeline:
+    """顺序执行中间件；遇到首个决策即短路返回。"""
+
     def __init__(self, middlewares: list[Middleware]) -> None:
         self.middlewares = middlewares
 
@@ -13,6 +15,7 @@ class MiddlewarePipeline:
             try:
                 decision = middleware.process(ctx)
             except Exception as exc:
+                # 标准化中间件异常信息，便于定位失败环节。
                 middleware_name = getattr(middleware, "name", middleware.__class__.__name__)
                 raise RuntimeError(
                     f"middleware_failed:{middleware_name}:{exc}"

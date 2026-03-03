@@ -4,6 +4,8 @@ from typing import Any
 
 
 class InMemorySceneRepository:
+    """内存场景仓库。"""
+
     def __init__(self, scenes: list[dict[str, Any]]) -> None:
         self._scenes = [scene for scene in scenes if scene.get("enabled", True)]
         self._by_id = {scene["scene_id"]: scene for scene in self._scenes}
@@ -16,6 +18,8 @@ class InMemorySceneRepository:
 
 
 class InMemoryTemplateRepository:
+    """内存模板仓库。"""
+
     def __init__(self, templates: list[dict[str, Any]]) -> None:
         self._templates = [template for template in templates if template.get("enabled", True)]
 
@@ -27,6 +31,8 @@ class InMemoryTemplateRepository:
 
 
 class InMemoryCaseRepository:
+    """内存案例仓库。"""
+
     def __init__(self, cases: list[dict[str, Any]]) -> None:
         self._cases = [item for item in cases if item.get("enabled", True)]
 

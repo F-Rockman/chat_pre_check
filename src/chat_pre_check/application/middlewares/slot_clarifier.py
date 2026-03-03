@@ -10,6 +10,8 @@ from chat_pre_check.domain.models import RequestContext, RouteDecision, TraceSte
 
 
 class SlotClarifierMiddleware:
+    """槽位澄清器：补默认值、计算缺槽位、生成追问选项。"""
+
     name = "slot_clarifier"
 
     def __init__(
@@ -43,6 +45,7 @@ class SlotClarifierMiddleware:
                 ctx.slots[slot_name] = default_value
 
         required_slots = list(scene.get("required_slots", []))
+        # 条件必填：根据已填槽位动态扩展 required_slots。
         for condition in scene.get("conditional_slots", []):
             slot_name = condition.get("if_slot")
             expected = condition.get("equals")
@@ -58,6 +61,7 @@ class SlotClarifierMiddleware:
         )
 
         if missing:
+            # 多缺口场景按策略引擎排序，只询问本轮最关键槽位。
             ask_slots = self.slot_policy_engine.select_slots_to_ask(
                 scene_id=ctx.scene,
                 missing_slots=missing,

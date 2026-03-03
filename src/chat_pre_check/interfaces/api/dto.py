@@ -6,6 +6,8 @@ from pydantic import BaseModel, Field
 
 
 class RouteRequestDTO(BaseModel):
+    """路由请求 DTO。"""
+
     input_text: str
     context: dict[str, Any] = Field(default_factory=dict)
     tenant_id: str | None = None
@@ -14,6 +16,8 @@ class RouteRequestDTO(BaseModel):
 
 
 class ActionOptionDTO(BaseModel):
+    """交互选项 DTO。"""
+
     label: str
     intent: str | None = None
     preset_slots: dict[str, Any] = Field(default_factory=dict)
@@ -22,6 +26,8 @@ class ActionOptionDTO(BaseModel):
 
 
 class RouteResponseDTO(BaseModel):
+    """路由响应 DTO。"""
+
     type: str
     message: str
     scene: str | None = None

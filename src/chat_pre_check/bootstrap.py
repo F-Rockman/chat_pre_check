@@ -42,6 +42,8 @@ from chat_pre_check.infrastructure.retrievers.opensearch_vector_retriever import
 
 
 class EmptyRetriever:
+    """无检索后端时的空实现，统一返回空召回。"""
+
     def search_scene(self, query_text: str, topk: int = 5) -> list[SearchHit]:
         return []
 
@@ -58,7 +60,7 @@ def _local_timezone() -> str:
     tzname = datetime.now().astimezone().tzinfo
     if tzname is None:
         return "UTC"
-    # ZoneInfo has key; fallback to string.
+    # ZoneInfo 优先取 key，其他时区对象退化为字符串表示。
     if isinstance(tzname, ZoneInfo):
         return tzname.key
     return str(tzname)
@@ -76,6 +78,7 @@ def build_engine(
     device_resolver_override=None,
     region_resolver_override=None,
 ) -> PrecheckEngine:
+    # 读取配置并构建内存仓库。当前能力定义由配置统一展开后加载到 scene/template/case 三类仓库。
     config = load_app_config(config_dir)
     scene_repo = InMemorySceneRepository(config.scenes)
     template_repo = InMemoryTemplateRepository(config.templates)
@@ -103,6 +106,7 @@ def build_engine(
     if retriever is None or device_resolver is None or region_resolver is None:
         os_url = os_url or os.getenv("CHAT_PRE_CHECK_OS_URL")
         if os_url:
+            # 通过统一工厂适配 OpenSearch / Elasticsearch，后续仅依赖抽象 client 能力。
             _, client = build_search_client(
                 vector_cfg=vector_cfg,
                 base_url=os_url,
@@ -136,10 +140,15 @@ def build_engine(
                 index_name=vector_cfg.get("region_index", "assets_region_v1"),
             )
         else:
+            # 未配置检索后端时降级为本地空实现，保证服务可启动用于离线开发。
             retriever = retriever or EmptyRetriever()
             device_resolver = device_resolver or NoopResolver()
             region_resolver = region_resolver or NoopResolver()
 
+    # Pipeline 顺序约束：
+    # 1) 先做文本标准化、输入校验、实体提取/预填；
+    # 2) 再做策略/范围判定与场景路由；
+    # 3) 模板优先，只有模板未命中时才进入 SeedScopeGuard + NL2SQL 兜底。
     pipeline = MiddlewarePipeline(
         [
             NormalizeMiddleware(),
@@ -201,7 +210,7 @@ def build_engine(
                 fusion_weights=template_weights,
                 template_topk=int(vector_cfg.get("template_topk", 5)),
             ),
-            # Only enforce seed scope when request is about to fallback to NL2SQL.
+            # SeedGuard 仅在即将进入 NL2SQL 兜底链路前生效，避免误伤已命中的模板请求。
             SeedScopeGuardMiddleware(
                 retriever=retriever,
                 recommendation_service=recommendation_service,

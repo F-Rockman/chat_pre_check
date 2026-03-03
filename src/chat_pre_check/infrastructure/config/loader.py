@@ -10,6 +10,7 @@ from chat_pre_check.infrastructure.config.validator import validate_config
 
 @dataclass(slots=True)
 class AppConfig:
+    """运行时配置聚合对象。"""
     capabilities: list[dict[str, Any]]
     scenes: list[dict[str, Any]]
     templates: list[dict[str, Any]]
@@ -27,6 +28,7 @@ def _load_json(path: Path) -> Any:
 
 
 def load_app_config(config_dir: str | Path) -> AppConfig:
+    """加载并编译配置：capabilities -> scenes/templates/cases/seed_cases。"""
     root = Path(config_dir)
     capabilities_payload = _load_json(root / "capabilities.json")
     capabilities, slot_policy_defaults = _parse_capabilities_payload(capabilities_payload)
@@ -50,6 +52,7 @@ def load_app_config(config_dir: str | Path) -> AppConfig:
 
 
 def _parse_capabilities_payload(payload: Any) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """兼容 capabilities.json 两种格式：数组或对象包装。"""
     if isinstance(payload, list):
         return [item for item in payload if isinstance(item, dict)], {}
     if not isinstance(payload, dict):
@@ -76,6 +79,7 @@ def _compile_capabilities(
     list[dict[str, Any]],
     dict[str, Any],
 ]:
+    """将业务能力定义编译为运行时视图结构。"""
     scenes: list[dict[str, Any]] = []
     templates: list[dict[str, Any]] = []
     cases: list[dict[str, Any]] = []
@@ -191,6 +195,7 @@ def _compile_capability_intents(
     enabled: bool,
     intents: Any,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], set[str], set[str]]:
+    """编译 capability.intents，拆解为模板视图与 seed 视图。"""
     if not isinstance(intents, list):
         return [], [], set(), set()
     compiled_templates: list[dict[str, Any]] = []
@@ -230,6 +235,7 @@ def _normalize_intent_seed_item(
     capability_id: str,
     enabled: bool,
 ) -> dict[str, Any] | None:
+    """归一化单条 intent 为 seed_case 结构。"""
     case_id = str(intent.get("case_id", "")).strip()
     if not case_id:
         return None
@@ -274,6 +280,7 @@ def _normalize_intent_template_item(
     capability_id: str,
     enabled: bool,
 ) -> dict[str, Any] | None:
+    """归一化单条 intent 为 template 结构（可选）。"""
     template = _to_dict(intent.get("template"))
     template_id = str(template.get("template_id") or intent.get("template_id", "")).strip()
     if not template_id:

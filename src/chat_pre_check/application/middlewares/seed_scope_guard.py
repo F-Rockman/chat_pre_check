@@ -10,6 +10,8 @@ from chat_pre_check.domain.models import RequestContext, RouteDecision, SearchHi
 
 
 class SeedScopeGuardMiddleware:
+    """Seed 能力边界守卫：控制 NL2SQL 兜底是否放行。"""
+
     name = "seed_scope_guard"
 
     def __init__(
@@ -93,6 +95,7 @@ class SeedScopeGuardMiddleware:
             )
 
         if len(seed_hits) < min_hits or score < min_score:
+            # 命中数量或相似度不达标时拒绝 NL2SQL，返回边界内替代建议。
             elapsed = (time.perf_counter() - started) * 1000
             ctx.trace.add_step(
                 TraceStep(

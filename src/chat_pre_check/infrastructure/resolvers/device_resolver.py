@@ -6,6 +6,8 @@ from chat_pre_check.domain.models import Candidate
 
 
 class DeviceResolver:
+    """设备解析器：基于设备索引做文本召回并标准化候选分数。"""
+
     def __init__(self, client: Any, index_name: str) -> None:
         self.client = client
         self.index_name = index_name

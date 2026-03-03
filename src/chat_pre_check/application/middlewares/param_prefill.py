@@ -13,6 +13,8 @@ from chat_pre_check.infrastructure.extractors.ac_prefill import (
 
 
 class PrefillDomainRouter:
+    """预提参域路由器：根据场景/关键词/槽位选择本轮参与匹配的业务域。"""
+
     def __init__(self, config: dict[str, Any] | None = None) -> None:
         cfg = config or {}
         self.enabled = bool(cfg.get("enabled", True))
@@ -104,6 +106,8 @@ class PrefillDomainRouter:
 
 
 class PrefillArbiter:
+    """跨域仲裁器：合并多域命中并处理同槽位冲突。"""
+
     def __init__(self, config: dict[str, Any] | None = None) -> None:
         cfg = config or {}
         self.domain_priority = self._to_float_mapping(cfg.get("domain_priority", {}))
@@ -151,6 +155,7 @@ class PrefillArbiter:
         )
 
     def _rank_key(self, slot_name: str, item: ACMatch) -> tuple[float, float, int, int]:
+        # 排序优先级：有效分(含惩罚) > 域优先级 > 词长 > 位置。
         domain = str(item.metadata.get("prefill_domain", ""))
         score = float(item.score) - self._penalty(slot_name, domain)
         priority = float(self.domain_priority.get(domain, 0.0))
@@ -216,6 +221,8 @@ class PrefillArbiter:
 
 
 class ParamPrefillMiddleware:
+    """参数预填中间件：AC 命中后产出候选，并可按阈值自动回填槽位。"""
+
     name = "param_prefill"
 
     def __init__(
@@ -257,6 +264,7 @@ class ParamPrefillMiddleware:
 
         committed_slots: dict[str, Any] = {}
         if self.auto_commit:
+            # 仅提交高置信且有明显领先优势的候选，降低误填风险。
             for slot_name, ranked in result.slot_matches.items():
                 if not ranked:
                     continue
@@ -274,6 +282,7 @@ class ParamPrefillMiddleware:
             key = self._candidate_key(slot_name)
             if not key:
                 continue
+            # 与现有候选融合去重，保留更高分结果。
             existing = self._normalize_candidates(ctx.entities.get(key, []))
             merged = self._merge_candidates(existing, candidates)
             ctx.entities[key] = merged
@@ -316,6 +325,7 @@ class ParamPrefillMiddleware:
         text: str,
     ) -> tuple[dict[str, ACPrefillResult], list[str]]:
         if isinstance(self.prefiller, ACDomainPrefillManager):
+            # 多域模式：先选域，再按域匹配，最终交由仲裁器统一合并。
             available_domains = self.prefiller.available_domains()
             selected = self.domain_router.select_domains(
                 ctx=ctx,
@@ -332,6 +342,7 @@ class ParamPrefillMiddleware:
             )
 
         if isinstance(self.prefiller, ACSlotPrefiller):
+            # 单域兼容路径：统一标记为 default 域，复用后续合并流程。
             result = self.prefiller.match(
                 text,
                 max_candidates_per_slot=self.max_candidates_per_slot,

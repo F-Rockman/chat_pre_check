@@ -9,6 +9,8 @@ from chat_pre_check.domain.models import RequestContext, RouteDecision, TraceSte
 
 
 class PolicyGuardMiddleware:
+    """策略守卫：基于规则对输入做拒答判定。"""
+
     name = "policy_guard"
 
     def __init__(
@@ -23,6 +25,7 @@ class PolicyGuardMiddleware:
         started = time.perf_counter()
         text = ctx.norm_text
 
+        # 判定顺序按风险优先，从最强限制到一般限制。
         if self._contains_any(text, self.rules.get("policy_block_keywords", [])):
             return self._refuse(
                 ctx,

@@ -32,6 +32,7 @@ REQUIRED_VECTOR_KEYS = {
 
 
 def validate_config(config: "AppConfig") -> None:
+    """配置总校验入口，启动阶段失败优先。"""
     _validate_capabilities(config.capabilities)
     _validate_scene_config(config.scenes)
     _validate_template_config(config.templates, config.scenes)
@@ -43,6 +44,7 @@ def validate_config(config: "AppConfig") -> None:
 
 
 def _validate_capabilities(capabilities: list[dict[str, Any]]) -> None:
+    """校验 capability 主体结构及嵌套 intent/template 合法性。"""
     capability_ids = set()
     for cap in capabilities:
         missing = REQUIRED_CAPABILITY_KEYS - set(cap.keys())
@@ -94,6 +96,7 @@ def _validate_capabilities(capabilities: list[dict[str, Any]]) -> None:
 
 
 def _validate_scene_config(scenes: list[dict[str, Any]]) -> None:
+    """校验 scenes 视图结构。"""
     scene_ids = set()
     for scene in scenes:
         missing = REQUIRED_SCENE_KEYS - set(scene.keys())
@@ -112,6 +115,7 @@ def _validate_scene_config(scenes: list[dict[str, Any]]) -> None:
 def _validate_template_config(
     templates: list[dict[str, Any]], scenes: list[dict[str, Any]]
 ) -> None:
+    """校验 templates 视图结构及 scene 引用。"""
     template_ids = set()
     scene_ids = {scene["scene_id"] for scene in scenes}
     for template in templates:
@@ -136,6 +140,7 @@ def _validate_template_config(
 
 
 def _validate_seed_cases(seed_cases: list[dict[str, Any]], scenes: list[dict[str, Any]]) -> None:
+    """校验 seed cases 视图结构及 scene 引用。"""
     scene_ids = {scene["scene_id"] for scene in scenes}
     case_ids = set()
     for case in seed_cases:
@@ -154,6 +159,7 @@ def _validate_seed_cases(seed_cases: list[dict[str, Any]], scenes: list[dict[str
 
 
 def _validate_capability_intents(capability_id: str, intents: Any) -> None:
+    """校验 capability.intents 的语义最小集与字段类型。"""
     if intents in (None, []):
         return
     if not isinstance(intents, list):
@@ -228,6 +234,7 @@ def _validate_intent_template(
     template: dict[str, Any],
     seen_template_ids: set[str],
 ) -> None:
+    """校验单条 intent 内联模板定义。"""
     template_id = str(template.get("template_id", "")).strip()
     if not template_id:
         raise ValueError(
@@ -255,6 +262,7 @@ def _validate_intent_template(
 
 
 def _validate_thresholds(thresholds: dict[str, float]) -> None:
+    """阈值校验：统一要求 [0,1]。"""
     threshold_missing = REQUIRED_THRESHOLD_KEYS - set(thresholds.keys())
     if threshold_missing:
         raise ValueError(f"Threshold config missing keys: {threshold_missing}")
@@ -269,6 +277,7 @@ def _validate_thresholds(thresholds: dict[str, float]) -> None:
 
 
 def _validate_vector(vector: dict[str, Any]) -> None:
+    """向量与预提参配置校验。"""
     vector_missing = REQUIRED_VECTOR_KEYS - set(vector.keys())
     if vector_missing:
         raise ValueError(f"Vector config missing keys: {vector_missing}")
@@ -362,6 +371,7 @@ def _validate_vector(vector: dict[str, Any]) -> None:
 
 
 def _validate_rules(rules: dict[str, Any]) -> None:
+    """规则配置基础校验。"""
     for key in (
         "unknown_domain_keywords",
         "unsupported_domain_keywords",
@@ -377,6 +387,7 @@ def _validate_rules(rules: dict[str, Any]) -> None:
 
 
 def _validate_slot_policies(slot_policies: dict[str, Any]) -> None:
+    """槽位策略配置基础校验。"""
     if not slot_policies:
         return
     if not isinstance(slot_policies, dict):

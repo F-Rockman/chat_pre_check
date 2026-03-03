@@ -8,6 +8,8 @@ from chat_pre_check.domain.models import RequestContext, RouteDecision, TraceSte
 
 
 class InputGuardMiddleware:
+    """输入边界守卫：拦截空输入和超长输入。"""
+
     name = "input_guard"
 
     def __init__(
@@ -26,6 +28,7 @@ class InputGuardMiddleware:
         raw = (ctx.input_text or "").strip()
         norm = (ctx.norm_text or "").strip()
 
+        # 空输入走澄清，避免无意义下游处理。
         if len(raw) < self.min_input_chars or len(norm) < self.min_input_chars:
             elapsed = (time.perf_counter() - started) * 1000
             ctx.trace.add_step(
@@ -46,6 +49,7 @@ class InputGuardMiddleware:
                 ),
             )
 
+        # 超长输入直接拒答，降低误召回和异常解析成本。
         if len(raw) > self.max_input_chars:
             elapsed = (time.perf_counter() - started) * 1000
             ctx.trace.add_step(

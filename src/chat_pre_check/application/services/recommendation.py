@@ -7,6 +7,8 @@ from chat_pre_check.domain.models import ActionOption, Candidate, RequestContext
 
 
 class RecommendationService:
+    """推荐服务：为拒答、澄清、范围外场景生成下一步动作。"""
+
     def __init__(
         self,
         scenes: list[dict[str, Any]],
@@ -22,6 +24,7 @@ class RecommendationService:
     ) -> list[ActionOption]:
         scene_id = ctx.scene or ctx.context_scene
         options: list[ActionOption] = []
+        # 按拒答原因分层推荐，优先给“可执行下一步”而不是泛化提示。
 
         if reason == OutOfScopeReason.POLICY_BLOCKED:
             options.extend(self._template_options(scene_id=None, limit=2))
@@ -62,7 +65,7 @@ class RecommendationService:
             options.extend(self._template_options(scene_id=None, limit=3))
             return self._dedup_options(options, limit=limit)
 
-        # UNSUPPORTED_DOMAIN and fallback path.
+        # UNSUPPORTED_DOMAIN 及其他兜底场景。
         options.extend(self._template_options(scene_id=scene_id, limit=3))
         options.extend(self._case_action_options(scene_id=scene_id, limit=2))
         options.append(ActionOption(label="我能查什么？", intent="capability.list"))
@@ -216,6 +219,7 @@ class RecommendationService:
         blocked_keywords: list[str] | None = None,
     ) -> list[ActionOption]:
         blocked = [item.lower() for item in (blocked_keywords or [])]
+        # 同场景模板优先，减少用户跨域跳转成本。
         ordered_templates = sorted(
             self.templates,
             key=lambda item: (
@@ -255,6 +259,7 @@ class RecommendationService:
         blocked_keywords: list[str] | None = None,
     ) -> list[ActionOption]:
         blocked = [item.lower() for item in (blocked_keywords or [])]
+        # 从种子意图配置抽取“建议动作”，用于拒答/追问时的下一跳引导。
         ordered_cases = sorted(
             self.cases,
             key=lambda item: (
@@ -291,6 +296,7 @@ class RecommendationService:
     def _dedup_options(options: list[ActionOption], *, limit: int) -> list[ActionOption]:
         deduped: list[ActionOption] = []
         seen: set[tuple[str, str | None, str | None]] = set()
+        # 去重键包含文案+意图+槽位值，避免推荐项语义重复。
         for option in options:
             key = (option.label, option.intent, str(option.slot_value))
             if key in seen:

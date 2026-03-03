@@ -7,6 +7,8 @@ from chat_pre_check.domain.models import RequestContext, RouteDecision, TraceSte
 
 
 class NL2SQLRouterMiddleware:
+    """最终兜底路由：模板未命中时统一转入 NL2SQL。"""
+
     name = "nl2sql_router"
 
     def process(self, ctx: RequestContext) -> RouteDecision | None:

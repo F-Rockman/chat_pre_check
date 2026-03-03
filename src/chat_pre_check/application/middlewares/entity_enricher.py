@@ -10,6 +10,8 @@ from chat_pre_check.domain.models import RequestContext, RouteDecision, TraceSte
 
 
 class EntityEnricherMiddleware:
+    """远程解析增强：补充设备/区域候选并按阈值自动落槽。"""
+
     name = "entity_enricher"
 
     def __init__(
@@ -52,6 +54,7 @@ class EntityEnricherMiddleware:
                 resolver_errors["region"] = str(exc)
 
         if resolver_errors and not self._has_prefill_fallback(ctx, device_candidates, region_candidates):
+            # 远程解析失败且本地无可用候选时，统一走数据不可用拒答。
             elapsed = (time.perf_counter() - started) * 1000
             ctx.trace.add_step(
                 TraceStep(
@@ -97,6 +100,7 @@ class EntityEnricherMiddleware:
         return None
 
     def _commit_slot(self, slot_name: str, candidates: list, ctx: RequestContext) -> None:
+        # 仅在 top1 分数和 top1-top2 gap 同时达标时自动提交，避免误填。
         if ctx.slots.get(slot_name) not in (None, ""):
             return
         if not candidates:

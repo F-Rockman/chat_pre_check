@@ -6,12 +6,15 @@ from typing import Any
 
 @dataclass(slots=True)
 class SlotDecision:
+    """缺槽位排序结果。"""
     slot_name: str
     score: float
     reason: str
 
 
 class SlotPolicyEngine:
+    """槽位追问策略引擎：决定本轮该先问哪些槽位。"""
+
     def __init__(self, policy_config: dict[str, Any] | None = None) -> None:
         self.policy_config = policy_config or {}
         self.default_cfg = self.policy_config.get("default", {})
@@ -33,6 +36,7 @@ class SlotPolicyEngine:
         slots: dict[str, Any],
         entities: dict[str, Any],
     ) -> list[str]:
+        # 先排序再截断，限制单轮追问数量。
         decisions = self.rank_missing_slots(
             scene_id=scene_id,
             missing_slots=missing_slots,
@@ -50,6 +54,7 @@ class SlotPolicyEngine:
         slots: dict[str, Any],
         entities: dict[str, Any],
     ) -> list[SlotDecision]:
+        # 分数越高优先级越高；条件不满足时大幅降权。
         ranked: list[SlotDecision] = []
         for slot_name in missing_slots:
             slot_cfg = self._slot_cfg(scene_id, slot_name)

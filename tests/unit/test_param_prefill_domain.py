@@ -124,3 +124,35 @@ def test_prefill_arbiter_applies_slot_domain_priority() -> None:
     top = merged.slot_matches["metric"][0]
     assert top.resolved_slot_value() == "latency_kpi"
     assert top.metadata.get("prefill_domain") == "kpi"
+
+
+def test_domain_manager_prefers_high_priority_when_scores_equal() -> None:
+    manager = ACDomainPrefillManager.from_terms(
+        terms=[
+            PrefillTerm(
+                term="cpu",
+                domain="alarm",
+                slot="metric",
+                value="cpu_alarm",
+                score=0.9,
+                word_boundary=True,
+            ),
+            PrefillTerm(
+                term="cpu",
+                domain="kpi",
+                slot="metric",
+                value="cpu_kpi",
+                score=0.9,
+                word_boundary=True,
+            ),
+        ],
+        ignore_case=True,
+        min_term_length=2,
+        default_word_boundary=True,
+        max_matches=20,
+        domain_priority={"alarm": 1.0, "kpi": 0.5},
+    )
+    merged = manager.match("查询cpu趋势", domains=["kpi", "alarm"], max_candidates_per_slot=3)
+    top = merged.slot_matches["metric"][0]
+    assert top.resolved_slot_value() == "cpu_alarm"
+    assert top.metadata.get("prefill_domain") == "alarm"

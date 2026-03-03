@@ -16,6 +16,8 @@ from chat_pre_check.domain.models import RequestContext, RouteDecision, SearchHi
 
 
 class ScopeGateMiddleware:
+    """场景闸门：融合规则分与向量分，判断是否在支持范围内。"""
+
     name = "scope_gate"
 
     def __init__(
@@ -37,6 +39,7 @@ class ScopeGateMiddleware:
     def process(self, ctx: RequestContext) -> RouteDecision | None:
         started = time.perf_counter()
         if ctx.context_scene and self.scene_repository.get(ctx.context_scene):
+            # 上下文显式指定且存在的场景优先。
             ctx.scene = ctx.context_scene
             elapsed = (time.perf_counter() - started) * 1000
             ctx.trace.add_step(
@@ -88,7 +91,7 @@ class ScopeGateMiddleware:
                     example_similarity_score(ctx.norm_text, scene.get("examples", [])),
                 ),
                 "vector": vector_map.get(scene_id, 0.0),
-                # Avoid rejecting in-scope but under-specified queries too early.
+                # 对信息不完整的站内查询给最小实体分，避免过早拒答。
                 "entity": max(0.4, coverage),
             }
             final_score = weighted_score(score_parts, self.fusion_weights)

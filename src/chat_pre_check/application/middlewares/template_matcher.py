@@ -15,6 +15,8 @@ from chat_pre_check.domain.models import RequestContext, RouteDecision, SearchHi
 
 
 class TemplateMatcherMiddleware:
+    """模板匹配器：在已定场景内选择最优模板并判断是否可执行。"""
+
     name = "template_matcher"
 
     def __init__(
@@ -103,6 +105,7 @@ class TemplateMatcherMiddleware:
             if self._contains_negative_keyword(
                 ctx.norm_text, template.get("negative_keywords", [])
             ):
+                # 负向词命中时强制清零规则分，抑制误触发模板。
                 score_parts["rule"] = 0.0
             total = weighted_score(score_parts, self.fusion_weights)
             scored.append((template_id, total, score_parts, template))

@@ -173,6 +173,8 @@ class LocalHeuristicRetriever:
 
 
 class LocalDeviceResolver:
+    """本地设备解析器：用于无远程依赖演示。"""
+
     def resolve(self, text: str, topk: int = 5) -> list[Candidate]:
         candidates: list[Candidate] = []
         match = IP_RE.search(text)
@@ -188,6 +190,8 @@ class LocalDeviceResolver:
 
 
 class LocalRegionResolver:
+    """本地区域解析器：用于无远程依赖演示。"""
+
     REGION_MAP = {
         "北京": ("region_bj", "北京"),
         "上海": ("region_sh", "上海"),
@@ -210,6 +214,7 @@ class LocalRegionResolver:
 
 
 def build_local_fallback_engine(config_dir: str = "configs"):
+    """构建纯本地可运行引擎（无 ES/OS 依赖）。"""
     config = load_app_config(config_dir)
     retriever = LocalHeuristicRetriever(
         scenes=config.scenes,

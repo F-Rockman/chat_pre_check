@@ -4,6 +4,7 @@ from chat_pre_check.domain.models import TraceCollector
 
 
 def render_trace(trace: TraceCollector, level: str = "compact") -> dict:
+    """按级别渲染 trace，debug 输出完整 topk/extra，compact 输出摘要字段。"""
     if level == "debug":
         return {
             "request_id": trace.request_id,
