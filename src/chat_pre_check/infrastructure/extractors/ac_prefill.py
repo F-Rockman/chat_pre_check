@@ -12,6 +12,7 @@ from chat_pre_check.domain.models import Candidate
 @dataclass(slots=True)
 class PrefillTerm:
     term: str
+    domain: str = "default"
     slot: str | None = None
     value: Any | None = None
     entity_id: str | None = None
@@ -276,6 +277,7 @@ class ACSlotPrefiller:
                 normalized_aliases.append(alias.strip())
             clean = PrefillTerm(
                 term=term.term.strip(),
+                domain=str(term.domain or "default").strip() or "default",
                 slot=term.slot,
                 value=term.value,
                 entity_id=term.entity_id,
@@ -301,7 +303,8 @@ class ACSlotPrefiller:
     @staticmethod
     def _term_key(term: PrefillTerm, *, ignore_case: bool) -> str:
         normalized = ACSlotPrefiller._normalize_keyword(term.term, ignore_case=ignore_case)
-        return f"{term.slot}|{term.value}|{term.entity_id}|{normalized}"
+        domain = str(term.domain or "default").strip() or "default"
+        return f"{domain}|{term.slot}|{term.value}|{term.entity_id}|{normalized}"
 
     @staticmethod
     def _rank_key(hit: ACMatch) -> tuple[float, int, int]:
@@ -332,7 +335,7 @@ def build_slot_prefiller(
     *,
     config_dir: str | Path,
     prefill_cfg: dict[str, Any] | None,
-) -> ACSlotPrefiller | None:
+) -> "ACDomainPrefillManager | None":
     cfg = prefill_cfg or {}
     if not bool(cfg.get("enabled", False)):
         return None
@@ -341,12 +344,13 @@ def build_slot_prefiller(
     terms = _parse_prefill_terms(raw_terms)
     if not terms:
         return None
-    return ACSlotPrefiller(
-        terms,
+    return ACDomainPrefillManager.from_terms(
+        terms=terms,
         ignore_case=bool(cfg.get("ignore_case", True)),
         min_term_length=max(1, int(cfg.get("min_term_length", 2))),
         default_word_boundary=bool(cfg.get("default_word_boundary", True)),
         max_matches=max(1, int(cfg.get("max_matches", 200))),
+        domain_priority=_to_domain_priority(cfg.get("domain_priority")),
     )
 
 
@@ -364,11 +368,30 @@ def _resolve_raw_terms(*, config_dir: Path, prefill_cfg: dict[str, Any]) -> list
 
     with dictionary_path.open("r", encoding="utf-8") as handle:
         payload = json.load(handle)
-    if isinstance(payload, dict):
-        payload = payload.get("terms", [])
-    if not isinstance(payload, list):
+    return _flatten_raw_terms(payload)
+
+
+def _flatten_raw_terms(payload: Any) -> list[dict[str, Any]]:
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)]
+    if not isinstance(payload, dict):
         return []
-    return [item for item in payload if isinstance(item, dict)]
+    terms: list[dict[str, Any]] = []
+    root_terms = payload.get("terms", [])
+    if isinstance(root_terms, list):
+        terms.extend(item for item in root_terms if isinstance(item, dict))
+    domain_groups = payload.get("domains", {})
+    if isinstance(domain_groups, dict):
+        for domain_name, domain_terms in domain_groups.items():
+            if not isinstance(domain_terms, list):
+                continue
+            for raw in domain_terms:
+                if not isinstance(raw, dict):
+                    continue
+                item = dict(raw)
+                item.setdefault("domain", str(domain_name))
+                terms.append(item)
+    return terms
 
 
 def _parse_prefill_terms(raw_terms: list[dict[str, Any]]) -> list[PrefillTerm]:
@@ -385,6 +408,7 @@ def _parse_prefill_terms(raw_terms: list[dict[str, Any]]) -> list[PrefillTerm]:
             metadata = {}
         term = PrefillTerm(
             term=keyword,
+            domain=_to_domain(raw.get("domain"), metadata),
             slot=_to_optional_str(raw.get("slot", raw.get("slot_name"))),
             value=raw.get("value", raw.get("slot_value")),
             entity_id=_to_optional_str(raw.get("entity_id")),
@@ -413,6 +437,16 @@ def _to_score(value: Any) -> float:
     return max(0.0, min(1.0, score))
 
 
+def _to_domain(value: Any, metadata: dict[str, Any]) -> str:
+    direct = _to_optional_str(value)
+    if direct:
+        return direct
+    meta_domain = _to_optional_str(metadata.get("domain"))
+    if meta_domain:
+        return meta_domain
+    return "default"
+
+
 def _to_optional_bool(value: Any) -> bool | None:
     if value is None:
         return None
@@ -433,3 +467,202 @@ def _is_ascii_word_char(ch: str) -> bool:
     if code >= 128:
         return False
     return ch.isalnum() or ch == "_"
+
+
+def _to_domain_priority(value: Any) -> dict[str, float]:
+    if not isinstance(value, dict):
+        return {}
+    priorities: dict[str, float] = {}
+    for key, raw in value.items():
+        domain = str(key).strip()
+        if not domain:
+            continue
+        try:
+            priorities[domain] = float(raw)
+        except (TypeError, ValueError):
+            continue
+    return priorities
+
+
+class ACDomainPrefillManager:
+    def __init__(
+        self,
+        *,
+        domain_prefillers: dict[str, ACSlotPrefiller],
+        domain_priority: dict[str, float] | None = None,
+    ) -> None:
+        self.domain_prefillers = dict(domain_prefillers)
+        self.domain_priority = domain_priority or {}
+
+    @classmethod
+    def from_terms(
+        cls,
+        *,
+        terms: list[PrefillTerm],
+        ignore_case: bool,
+        min_term_length: int,
+        default_word_boundary: bool,
+        max_matches: int,
+        domain_priority: dict[str, float] | None = None,
+    ) -> "ACDomainPrefillManager":
+        grouped: dict[str, list[PrefillTerm]] = {}
+        for term in terms:
+            domain = str(term.domain or "default").strip() or "default"
+            grouped.setdefault(domain, []).append(term)
+        prefiller_map: dict[str, ACSlotPrefiller] = {}
+        for domain, items in grouped.items():
+            prefiller_map[domain] = ACSlotPrefiller(
+                items,
+                ignore_case=ignore_case,
+                min_term_length=min_term_length,
+                default_word_boundary=default_word_boundary,
+                max_matches=max_matches,
+            )
+        return cls(domain_prefillers=prefiller_map, domain_priority=domain_priority)
+
+    def available_domains(self) -> list[str]:
+        domains = list(self.domain_prefillers.keys())
+        domains.sort(key=lambda item: (-self.domain_priority.get(item, 0.0), item))
+        return domains
+
+    def match_by_domain(
+        self,
+        text: str,
+        *,
+        domains: list[str] | None = None,
+        max_candidates_per_slot: int = 5,
+    ) -> dict[str, ACPrefillResult]:
+        selected = self._select_domains(domains)
+        results: dict[str, ACPrefillResult] = {}
+        for domain in selected:
+            prefiller = self.domain_prefillers.get(domain)
+            if prefiller is None:
+                continue
+            result = prefiller.match(text, max_candidates_per_slot=max_candidates_per_slot)
+            results[domain] = self._attach_domain(domain, result)
+        return results
+
+    def match(
+        self,
+        text: str,
+        *,
+        domains: list[str] | None = None,
+        max_candidates_per_slot: int = 5,
+    ) -> ACPrefillResult:
+        by_domain = self.match_by_domain(
+            text,
+            domains=domains,
+            max_candidates_per_slot=max_candidates_per_slot,
+        )
+        return self._merge_results(by_domain, max_candidates_per_slot=max_candidates_per_slot)
+
+    def _select_domains(self, domains: list[str] | None) -> list[str]:
+        if not domains:
+            return self.available_domains()
+        selected: list[str] = []
+        seen: set[str] = set()
+        for item in domains:
+            domain = str(item).strip()
+            if not domain or domain in seen:
+                continue
+            seen.add(domain)
+            if domain in self.domain_prefillers:
+                selected.append(domain)
+        return selected
+
+    def _attach_domain(self, domain: str, result: ACPrefillResult) -> ACPrefillResult:
+        cloned_matches = [self._clone_match(domain, item) for item in result.matches]
+        slot_matches: dict[str, list[ACMatch]] = {}
+        for slot_name, items in result.slot_matches.items():
+            slot_matches[slot_name] = [self._clone_match(domain, item) for item in items]
+        slot_candidates: dict[str, list[Candidate]] = {}
+        for slot_name, items in result.slot_candidates.items():
+            slot_candidates[slot_name] = []
+            for candidate in items:
+                meta = dict(candidate.meta)
+                meta["prefill_domain"] = domain
+                slot_candidates[slot_name].append(
+                    Candidate(
+                        entity_id=candidate.entity_id,
+                        name=candidate.name,
+                        score=candidate.score,
+                        meta=meta,
+                    )
+                )
+        return ACPrefillResult(
+            matches=cloned_matches,
+            slot_matches=slot_matches,
+            slot_candidates=slot_candidates,
+        )
+
+    def _merge_results(
+        self,
+        by_domain: dict[str, ACPrefillResult],
+        *,
+        max_candidates_per_slot: int,
+    ) -> ACPrefillResult:
+        all_matches: list[ACMatch] = []
+        slot_map: dict[str, dict[str, ACMatch]] = {}
+        for domain, result in by_domain.items():
+            all_matches.extend(result.matches)
+            for slot_name, items in result.slot_matches.items():
+                bucket = slot_map.setdefault(slot_name, {})
+                for item in items:
+                    key = f"{slot_name}:{item.resolved_slot_value()}"
+                    prev = bucket.get(key)
+                    if prev is None or self._rank_key(item) < self._rank_key(prev):
+                        bucket[key] = item
+
+        slot_matches: dict[str, list[ACMatch]] = {}
+        slot_candidates: dict[str, list[Candidate]] = {}
+        for slot_name, dedup in slot_map.items():
+            ranked = sorted(dedup.values(), key=self._rank_key)
+            if not ranked:
+                continue
+            slot_matches[slot_name] = ranked
+            slot_candidates[slot_name] = [
+                Candidate(
+                    entity_id=(
+                        str(item.entity_id)
+                        if item.entity_id is not None
+                        else str(item.resolved_slot_value())
+                    ),
+                    name=item.entity_name or item.matched_text,
+                    score=max(0.0, min(1.0, float(item.score))),
+                    meta={
+                        "source": "ac_prefill",
+                        "keyword": item.keyword,
+                        "slot": slot_name,
+                        "prefill_domain": str(item.metadata.get("prefill_domain", "")),
+                    },
+                )
+                for item in ranked[: max(1, int(max_candidates_per_slot))]
+            ]
+        return ACPrefillResult(
+            matches=all_matches,
+            slot_matches=slot_matches,
+            slot_candidates=slot_candidates,
+        )
+
+    @staticmethod
+    def _clone_match(domain: str, item: ACMatch) -> ACMatch:
+        metadata = dict(item.metadata)
+        metadata["prefill_domain"] = domain
+        return ACMatch(
+            keyword=item.keyword,
+            matched_text=item.matched_text,
+            start=item.start,
+            end=item.end,
+            slot=item.slot,
+            slot_value=item.slot_value,
+            entity_id=item.entity_id,
+            entity_name=item.entity_name,
+            score=item.score,
+            metadata=metadata,
+        )
+
+    def _rank_key(self, item: ACMatch) -> tuple[float, float, int, int]:
+        domain = str(item.metadata.get("prefill_domain", ""))
+        priority = float(self.domain_priority.get(domain, 0.0))
+        length = item.end - item.start + 1
+        return (-float(item.score), -priority, -length, item.start)

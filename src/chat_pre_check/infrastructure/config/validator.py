@@ -8,6 +8,7 @@ if TYPE_CHECKING:
 
 REQUIRED_SCENE_KEYS = {"scene_id", "description", "required_slots", "defaults"}
 REQUIRED_TEMPLATE_KEYS = {"template_id", "scene_id", "slot_schema", "examples"}
+REQUIRED_CAPABILITY_KEYS = {"capability_id", "description", "scope", "slots"}
 REQUIRED_THRESHOLD_KEYS = {
     "T_scope",
     "T_template",
@@ -31,12 +32,61 @@ REQUIRED_VECTOR_KEYS = {
 
 
 def validate_config(config: "AppConfig") -> None:
+    _validate_capabilities(config.capabilities)
     _validate_scene_config(config.scenes)
     _validate_template_config(config.templates, config.scenes)
+    _validate_seed_cases(config.seed_cases, config.scenes)
     _validate_thresholds(config.thresholds)
     _validate_vector(config.vector)
     _validate_rules(config.rules)
     _validate_slot_policies(config.slot_policies)
+
+
+def _validate_capabilities(capabilities: list[dict[str, Any]]) -> None:
+    capability_ids = set()
+    for cap in capabilities:
+        missing = REQUIRED_CAPABILITY_KEYS - set(cap.keys())
+        if missing:
+            raise ValueError(f"Capability config missing keys: {missing}")
+        capability_id = str(cap.get("capability_id", "")).strip()
+        if not capability_id:
+            raise ValueError("capability_id must not be empty")
+        if capability_id in capability_ids:
+            raise ValueError(f"Duplicate capability_id detected: {capability_id}")
+        capability_ids.add(capability_id)
+
+        scope = cap.get("scope", {})
+        if not isinstance(scope, dict):
+            raise ValueError(f"Capability scope must be object: {capability_id}")
+        if "keywords" in scope and not isinstance(scope["keywords"], list):
+            raise ValueError(f"Capability scope.keywords must be list: {capability_id}")
+        if "examples" in scope and not isinstance(scope["examples"], list):
+            raise ValueError(f"Capability scope.examples must be list: {capability_id}")
+
+        slots = cap.get("slots", {})
+        if not isinstance(slots, dict):
+            raise ValueError(f"Capability slots must be object: {capability_id}")
+        if "required" in slots and not isinstance(slots["required"], list):
+            raise ValueError(f"Capability slots.required must be list: {capability_id}")
+        if "conditional" in slots and not isinstance(slots["conditional"], list):
+            raise ValueError(f"Capability slots.conditional must be list: {capability_id}")
+        if "defaults" in slots and not isinstance(slots["defaults"], dict):
+            raise ValueError(f"Capability slots.defaults must be object: {capability_id}")
+        if "clarify_policy" in slots and not isinstance(slots["clarify_policy"], dict):
+            raise ValueError(f"Capability slots.clarify_policy must be object: {capability_id}")
+
+        templates = cap.get("templates", [])
+        if templates is not None and not isinstance(templates, list):
+            raise ValueError(f"Capability templates must be list: {capability_id}")
+        recommendations = cap.get("recommendations", [])
+        if recommendations is not None and not isinstance(recommendations, list):
+            raise ValueError(f"Capability recommendations must be list: {capability_id}")
+        seed_cases = cap.get("seed_cases", [])
+        if seed_cases is not None and not isinstance(seed_cases, list):
+            raise ValueError(f"Capability seed_cases must be list: {capability_id}")
+        slot_policy = cap.get("slot_policy", {})
+        if slot_policy is not None and not isinstance(slot_policy, dict):
+            raise ValueError(f"Capability slot_policy must be object: {capability_id}")
 
 
 def _validate_scene_config(scenes: list[dict[str, Any]]) -> None:
@@ -79,6 +129,24 @@ def _validate_template_config(
             raise ValueError(f"Template slot_schema.required must be list: {template_id}")
         if not isinstance(schema.get("optional", []), list):
             raise ValueError(f"Template slot_schema.optional must be list: {template_id}")
+
+
+def _validate_seed_cases(seed_cases: list[dict[str, Any]], scenes: list[dict[str, Any]]) -> None:
+    scene_ids = {scene["scene_id"] for scene in scenes}
+    case_ids = set()
+    for case in seed_cases:
+        case_id = str(case.get("case_id", "")).strip()
+        if not case_id:
+            raise ValueError("Seed case missing case_id")
+        if case_id in case_ids:
+            raise ValueError(f"Duplicate seed case_id detected: {case_id}")
+        case_ids.add(case_id)
+        scene_id = str(case.get("scene_id", "")).strip()
+        if not scene_id or scene_id not in scene_ids:
+            raise ValueError(f"Seed case scene_id not found: {case_id} -> {scene_id}")
+        text = str(case.get("text", "")).strip()
+        if len(text) < 2:
+            raise ValueError(f"Seed case text too short: {case_id}")
 
 
 def _validate_thresholds(thresholds: dict[str, float]) -> None:
@@ -160,6 +228,30 @@ def _validate_vector(vector: dict[str, Any]) -> None:
         raise ValueError("param_prefill.min_term_length must be >= 1")
     if "max_matches" in prefill and int(prefill["max_matches"]) < 1:
         raise ValueError("param_prefill.max_matches must be >= 1")
+    if "domain_penalty" in prefill and float(prefill["domain_penalty"]) < 0:
+        raise ValueError("param_prefill.domain_penalty must be >= 0")
+    if "domain_priority" in prefill and not isinstance(prefill["domain_priority"], dict):
+        raise ValueError("param_prefill.domain_priority must be object")
+    if "slot_domain_priority" in prefill and not isinstance(
+        prefill["slot_domain_priority"], dict
+    ):
+        raise ValueError("param_prefill.slot_domain_priority must be object")
+
+    domain_router = prefill.get("domain_router")
+    if domain_router is not None:
+        if not isinstance(domain_router, dict):
+            raise ValueError("param_prefill.domain_router must be object")
+        if "enabled" in domain_router and not isinstance(domain_router["enabled"], bool):
+            raise ValueError("param_prefill.domain_router.enabled must be bool")
+        if "max_domains" in domain_router and int(domain_router["max_domains"]) < 1:
+            raise ValueError("param_prefill.domain_router.max_domains must be >= 1")
+        if "default_domains" in domain_router and not isinstance(
+            domain_router["default_domains"], list
+        ):
+            raise ValueError("param_prefill.domain_router.default_domains must be list")
+        for key in ("scene_domains", "keyword_domains", "slot_domains"):
+            if key in domain_router and not isinstance(domain_router[key], dict):
+                raise ValueError(f"param_prefill.domain_router.{key} must be object")
 
 
 def _validate_rules(rules: dict[str, Any]) -> None:

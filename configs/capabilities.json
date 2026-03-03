@@ -1,0 +1,411 @@
+{
+  "version": "v1",
+  "slot_policy_defaults": {
+    "max_ask_per_turn": 2,
+    "slots": {
+      "*": {
+        "priority": 0.5,
+        "ask_cost": 0.5,
+        "defaultable": false,
+        "infer_from": []
+      },
+      "object_scope": {
+        "priority": 0.95,
+        "ask_cost": 0.2
+      },
+      "time_range": {
+        "priority": 0.9,
+        "ask_cost": 0.1,
+        "defaultable": true
+      },
+      "metric": {
+        "priority": 0.8,
+        "ask_cost": 0.3
+      },
+      "device_id": {
+        "priority": 0.75,
+        "ask_cost": 0.45,
+        "infer_from": ["device_candidates"]
+      },
+      "region_id": {
+        "priority": 0.7,
+        "ask_cost": 0.35,
+        "infer_from": ["region_candidates"]
+      },
+      "protocol": {
+        "priority": 0.65,
+        "ask_cost": 0.4
+      },
+      "topn": {
+        "priority": 0.6,
+        "ask_cost": 0.15,
+        "defaultable": true
+      },
+      "severity": {
+        "priority": 0.55,
+        "ask_cost": 0.3
+      }
+    }
+  },
+  "capabilities": [
+    {
+      "capability_id": "alarm.query",
+      "description": "告警查询与 TopN",
+      "enabled": true,
+      "scope": {
+        "keywords": ["告警", "报警", "top", "查询", "数量", "接口", "bgp", "flap", "错误包"],
+        "examples": [
+          "查告警",
+          "查近24小时核心网告警top10",
+          "今天广州区域严重告警数量",
+          "近24小时端口告警top5",
+          "近24小时接口错误包告警top10",
+          "近7天bgp抖动top20"
+        ]
+      },
+      "slots": {
+        "required": ["object_scope", "time_range"],
+        "conditional": [],
+        "defaults": {
+          "time_range": {
+            "mode": "relative",
+            "preset": "last_24h"
+          }
+        },
+        "clarify_policy": {
+          "primary_slots": ["object_scope", "time_range"]
+        }
+      },
+      "slot_policy": {
+        "max_ask_per_turn": 2,
+        "slots": {
+          "protocol": {
+            "priority": 0.78,
+            "applies_when": {
+              "object_scope": ["network", "core_network"]
+            }
+          }
+        }
+      },
+      "recommendations": [
+        {
+          "label": "近24小时全网告警",
+          "intent": "alarm.query",
+          "preset_slots": {
+            "object_scope": "network",
+            "time_range": {
+              "mode": "relative",
+              "preset": "last_24h"
+            }
+          },
+          "need_followup_slots": []
+        },
+        {
+          "label": "近7天严重告警",
+          "intent": "alarm.query",
+          "preset_slots": {
+            "severity": "critical",
+            "time_range": {
+              "mode": "relative",
+              "preset": "last_7d"
+            }
+          },
+          "need_followup_slots": ["object_scope"]
+        }
+      ],
+      "templates": [
+        {
+          "template_id": "tpl_alarm_topn",
+          "keywords": ["告警", "top", "核心网", "全网"],
+          "negative_keywords": ["关联率", "相关性"],
+          "slot_schema": {
+            "required": ["object_scope", "time_range", "topn"],
+            "optional": ["severity", "region_id"]
+          },
+          "examples": ["查近24小时核心网告警Top10", "查近24小时全网告警Top20"],
+          "enabled": true
+        },
+        {
+          "template_id": "tpl_alarm_count_severity",
+          "keywords": ["严重", "告警", "数量"],
+          "negative_keywords": ["top", "关联率"],
+          "slot_schema": {
+            "required": ["time_range", "severity"],
+            "optional": ["region_id", "object_scope"]
+          },
+          "examples": ["今天广州区域严重告警数量", "近7天北京严重告警数"],
+          "enabled": true
+        },
+        {
+          "template_id": "tpl_port_alarm_topn",
+          "keywords": ["端口", "告警", "top"],
+          "negative_keywords": ["相关性", "同比"],
+          "slot_schema": {
+            "required": ["object_scope", "time_range", "topn"],
+            "optional": ["severity"]
+          },
+          "examples": ["近24小时端口告警Top5", "昨天端口告警Top10"],
+          "enabled": true
+        },
+        {
+          "template_id": "tpl_interface_alarm_topn",
+          "keywords": ["接口", "错误包", "告警", "top"],
+          "negative_keywords": ["相关性", "关联率", "同比"],
+          "slot_schema": {
+            "required": ["object_scope", "time_range", "topn"],
+            "optional": ["region_id", "severity", "metric"]
+          },
+          "examples": ["近24小时接口错误包告警Top10", "近7天华南接口告警Top20"],
+          "enabled": true
+        },
+        {
+          "template_id": "tpl_bgp_flap_topn",
+          "keywords": ["bgp", "抖动", "flap", "top"],
+          "negative_keywords": ["相关性", "关联率"],
+          "slot_schema": {
+            "required": ["time_range", "topn", "protocol"],
+            "optional": ["region_id", "severity"]
+          },
+          "examples": ["近24小时BGP抖动Top10", "近7天华东BGP flap Top20"],
+          "enabled": true
+        }
+      ],
+      "seed_cases": [
+        {
+          "case_id": "seed_alarm_topn_core_24h",
+          "label": "查近24小时核心网告警Top10",
+          "text": "查近24小时核心网告警Top10"
+        },
+        {
+          "case_id": "seed_interface_error_topn",
+          "label": "近24小时接口错误包告警Top10",
+          "text": "近24小时接口错误包告警Top10"
+        },
+        {
+          "case_id": "seed_bgp_flap_topn",
+          "label": "近7天华东BGP flap Top20",
+          "text": "近7天华东BGP flap Top20"
+        }
+      ]
+    },
+    {
+      "capability_id": "device.query",
+      "description": "设备状态与离线分析",
+      "enabled": true,
+      "scope": {
+        "keywords": ["设备", "离线", "在线", "健康", "趋势", "cpu", "内存", "利用率"],
+        "examples": [
+          "昨天华东离线设备数",
+          "近7天设备10.2.3.4告警趋势",
+          "查设备状态",
+          "近24小时设备cpu利用率top10"
+        ]
+      },
+      "slots": {
+        "required": ["time_range"],
+        "conditional": [
+          {
+            "if_slot": "intent",
+            "equals": "trend",
+            "required_slots": ["device_id"]
+          },
+          {
+            "if_slot": "intent",
+            "equals": "offline_count",
+            "required_slots": ["region_id"]
+          }
+        ],
+        "defaults": {
+          "time_range": {
+            "mode": "relative",
+            "preset": "last_24h"
+          }
+        },
+        "clarify_policy": {
+          "primary_slots": ["device_id", "region_id", "time_range"]
+        }
+      },
+      "slot_policy": {
+        "max_ask_per_turn": 2,
+        "slots": {
+          "device_id": {
+            "priority": 0.88
+          }
+        }
+      },
+      "recommendations": [
+        {
+          "label": "昨天华东离线设备数",
+          "intent": "device.query",
+          "preset_slots": {
+            "time_range": {
+              "mode": "relative",
+              "preset": "yesterday"
+            },
+            "region_id": "east_cn"
+          },
+          "need_followup_slots": []
+        }
+      ],
+      "templates": [
+        {
+          "template_id": "tpl_alarm_trend_device",
+          "keywords": ["设备", "告警", "趋势"],
+          "negative_keywords": ["相关性", "关联率"],
+          "slot_schema": {
+            "required": ["device_id", "time_range"],
+            "optional": ["severity"]
+          },
+          "examples": ["近7天设备10.2.3.4告警趋势", "今天设备A告警趋势"],
+          "enabled": true
+        },
+        {
+          "template_id": "tpl_device_offline_count",
+          "keywords": ["离线", "设备", "数量"],
+          "negative_keywords": ["关联率", "同比"],
+          "slot_schema": {
+            "required": ["region_id", "time_range"],
+            "optional": []
+          },
+          "examples": ["昨天华东离线设备数", "近24小时广州离线设备数量"],
+          "enabled": true
+        },
+        {
+          "template_id": "tpl_device_cpu_hotspot",
+          "keywords": ["cpu", "top", "设备"],
+          "negative_keywords": ["相关性", "关联率"],
+          "slot_schema": {
+            "required": ["time_range", "topn", "metric"],
+            "optional": ["region_id"]
+          },
+          "examples": ["近24小时设备CPU利用率Top10", "今天华北设备CPU Top20"],
+          "enabled": true
+        }
+      ],
+      "seed_cases": [
+        {
+          "case_id": "seed_device_cpu_hotspot",
+          "label": "近24小时设备CPU利用率Top10",
+          "text": "近24小时设备CPU利用率Top10"
+        },
+        {
+          "case_id": "seed_offline_region",
+          "label": "昨天华东离线设备数",
+          "text": "昨天华东离线设备数"
+        }
+      ]
+    },
+    {
+      "capability_id": "alarm.analysis",
+      "description": "告警高级统计分析",
+      "enabled": true,
+      "scope": {
+        "keywords": ["统计", "关联率", "占比", "相关性", "同比", "环比", "分析", "趋势", "丢包率", "时延", "抖动", "吞吐", "带宽"],
+        "examples": [
+          "统计近7天每个地市告警与工单关联率",
+          "近30天按厂家分组的严重告警占比",
+          "近90天核心网告警同比环比",
+          "近7天各区域丢包率排名top10"
+        ]
+      },
+      "slots": {
+        "required": ["time_range"],
+        "conditional": [],
+        "defaults": {},
+        "clarify_policy": {
+          "primary_slots": ["time_range"]
+        }
+      },
+      "slot_policy": {
+        "max_ask_per_turn": 2,
+        "slots": {
+          "metric": {
+            "priority": 0.9
+          }
+        }
+      },
+      "recommendations": [
+        {
+          "label": "近24小时接口错误包告警Top10",
+          "intent": "alarm.query",
+          "preset_slots": {
+            "object_scope": "interface",
+            "time_range": {
+              "mode": "relative",
+              "preset": "last_24h"
+            },
+            "topn": 10
+          },
+          "need_followup_slots": []
+        },
+        {
+          "label": "近7天各区域丢包率排名Top10",
+          "intent": "alarm.analysis",
+          "preset_slots": {
+            "time_range": {
+              "mode": "relative",
+              "preset": "last_7d"
+            },
+            "metric": "packet_loss",
+            "topn": 10
+          },
+          "need_followup_slots": []
+        }
+      ],
+      "templates": [
+        {
+          "template_id": "tpl_packet_loss_region_rank",
+          "keywords": ["丢包率", "区域", "排名", "top"],
+          "negative_keywords": ["根因", "预测"],
+          "slot_schema": {
+            "required": ["time_range", "metric", "topn"],
+            "optional": ["region_id"]
+          },
+          "examples": ["近7天各区域丢包率排名Top10", "昨天地市丢包率Top5"],
+          "enabled": true
+        }
+      ],
+      "seed_cases": [
+        {
+          "case_id": "seed_packet_loss_rank",
+          "label": "近7天各区域丢包率排名Top10",
+          "text": "近7天各区域丢包率排名Top10"
+        },
+        {
+          "case_id": "seed_alarm_ticket_rate",
+          "label": "统计近7天每个地市告警与工单关联率",
+          "text": "统计近7天每个地市告警与工单关联率"
+        },
+        {
+          "case_id": "seed_alarm_qoq",
+          "label": "近90天核心网告警同比环比",
+          "text": "近90天核心网告警同比环比"
+        }
+      ]
+    },
+    {
+      "capability_id": "ticket.analysis",
+      "description": "工单与告警关联分析",
+      "enabled": true,
+      "scope": {
+        "keywords": ["工单", "ticket", "关联"],
+        "examples": ["近7天工单关联率", "工单闭环时长分析"]
+      },
+      "slots": {
+        "required": ["time_range"],
+        "conditional": [],
+        "defaults": {},
+        "clarify_policy": {
+          "primary_slots": ["time_range"]
+        }
+      },
+      "slot_policy": {
+        "max_ask_per_turn": 2,
+        "slots": {}
+      },
+      "recommendations": [],
+      "templates": [],
+      "seed_cases": []
+    }
+  ]
+}

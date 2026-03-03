@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import json
-from pathlib import Path
 from typing import Any
 
 from chat_pre_check.infrastructure.config.loader import load_app_config
@@ -119,11 +117,6 @@ def main() -> None:
     parser.add_argument("--config-dir", default="configs")
     parser.add_argument("--username", default=None)
     parser.add_argument("--password", default=None)
-    parser.add_argument(
-        "--seed-cases-file",
-        default="seed_cases.json",
-        help="Seed cases file name under config dir (set empty to skip).",
-    )
     args = parser.parse_args()
 
     config = load_app_config(args.config_dir)
@@ -142,13 +135,7 @@ def main() -> None:
 
     scene_docs = build_scene_docs(config.scenes, embedder)
     template_docs = build_template_docs(config.templates, embedder)
-    seed_docs: list[dict[str, Any]] = []
-    if args.seed_cases_file:
-        seed_path = Path(args.config_dir) / args.seed_cases_file
-        if seed_path.exists():
-            with seed_path.open("r", encoding="utf-8") as fp:
-                seed_cases = json.load(fp)
-            seed_docs = build_seed_case_docs(seed_cases, embedder)
+    seed_docs = build_seed_case_docs(config.seed_cases, embedder)
 
     client.ensure_vector_index(vector_cfg["scene_index"], dimension=768)
     client.ensure_vector_index(vector_cfg["template_index"], dimension=768)

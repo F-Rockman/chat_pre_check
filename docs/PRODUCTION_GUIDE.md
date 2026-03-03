@@ -152,20 +152,16 @@ python livemain.py --search-backend opensearch --os-url http://<os-host>:9200
 
 ## 4. 配置模型（核心）
 配置目录：
-- `configs/scenes.json`
-- `configs/templates.json`
-- `configs/cases.json`
+- `configs/capabilities.json`（统一能力定义：scene/template/seed_case/recommendation/slot_policy）
 - `configs/rules.json`
 - `configs/thresholds.json`
 - `configs/vector.json`（含 `search_backend` 开关：`opensearch` / `elasticsearch`）
-- `configs/slot_policies.json`
-- `configs/seed_cases.json`（用于 `seed_case_v1` 向量索引）
 
 seed_case 批量导入与字段规范见：
 - [SEED_CASE_SPEC.md](D:/GitHub/chat_pre_check/docs/SEED_CASE_SPEC.md)
 
 ### 4.1 Scene（场景）
-每个 `scene` 定义能力边界、必填槽位、默认值、追问策略。
+每个 `capability` 内的 `slots/scope` 定义能力边界、必填槽位、默认值、追问策略。
 
 关键字段：
 - `scene_id`
@@ -180,7 +176,7 @@ seed_case 批量导入与字段规范见：
 - `conditional_slots` 用于意图触发型必填（如 `intent=trend` 时必须有 `device_id`）。
 
 ### 4.2 Template（模板）
-每个模板定义“稳定可控查询”。
+每个 `capability.templates[*]` 定义“稳定可控查询”。
 
 关键字段：
 - `template_id`, `scene_id`
@@ -211,12 +207,12 @@ seed_case 批量导入与字段规范见：
 追问由 `SlotClarifierMiddleware` + `SlotPolicyEngine` 触发，策略如下：
 - 先补默认值，再检查缺失槽位。
 - 一轮最多追问 N 个槽位（可配置）。
-- 槽位优先级由 `slot_policies.json` 配置，不再写死代码。
+- 槽位优先级由 `capabilities.json -> slot_policy_defaults / capability.slot_policy` 配置，不再写死代码。
 
 配置方法：
-1. 在 `scene.required_slots` 声明基础必填槽位。
-2. 在 `scene.conditional_slots` 声明意图相关必填槽位。
-3. 在 `slot_policies.json` 中配置槽位 `priority/ask_cost/defaultable/infer_from/applies_when`。
+1. 在 `capability.slots.required` 声明基础必填槽位。
+2. 在 `capability.slots.conditional` 声明意图相关必填槽位。
+3. 在 `capabilities.json` 中配置 `slot_policy_defaults` 与 `capability.slot_policy` 的 `priority/ask_cost/defaultable/infer_from/applies_when`。
 4. 在 `RecommendationService.slot_clarify_options()` 中维护槽位候选按钮。
 
 示例（条件追问）：

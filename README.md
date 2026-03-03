@@ -78,12 +78,14 @@ python scripts/export_ac_terms.py \
 启用 AC 预提参（`configs/vector.json`）：
 - `param_prefill.enabled=true`
 - `param_prefill.dictionary_file=ac_terms.json`
+- `param_prefill.domain_router.max_domains=2`（按场景/关键词只激活部分业务域）
+- `param_prefill.slot_domain_priority`（同槽位跨域冲突仲裁）
 
 `seed_case_v1` 接口已预留（默认关闭能力边界拦截）：
 - 索引名配置：`configs/vector.json -> seed_case_index`
 - 后端开关：`configs/vector.json -> search_backend`（`opensearch` / `elasticsearch`）
 - 守卫开关：`configs/vector.json -> seed_scope_guard.enabled`
-- 槽位追问策略：`configs/slot_policies.json`
+- 统一能力定义：`configs/capabilities.json`
 
 ## seed_case 批量导入
 ```bash
@@ -91,7 +93,7 @@ python scripts/import_seed_cases.py \
   --input templates/seed_cases_template.csv \
   --input-format csv \
   --config-dir configs \
-  --output configs/seed_cases.json \
+  --output configs/capabilities.json \
   --merge-mode upsert \
   --on-duplicate keep_last
 ```
@@ -134,3 +136,4 @@ python scripts/eval_network_ops_benchmark.py \
 - seed_case 字段规范与导入指南：[docs/SEED_CASE_SPEC.md](docs/SEED_CASE_SPEC.md)
 - 检索后端切换（ES 当前 / OS 下一版）：`docs/PRODUCTION_GUIDE.md` 的 `2.2` 小节
 - 检索后端双栈开发指南：[docs/SEARCH_BACKEND_ARCHITECTURE_GUIDE.md](docs/SEARCH_BACKEND_ARCHITECTURE_GUIDE.md)
+- 版本变更记录：[CHANGELOG.md](CHANGELOG.md)

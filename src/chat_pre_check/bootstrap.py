@@ -155,6 +155,14 @@ def build_engine(
                 commit_score=float(prefill_cfg.get("commit_score", 0.95)),
                 min_gap=float(prefill_cfg.get("min_gap", 0.05)),
                 max_candidates_per_slot=int(prefill_cfg.get("max_candidates_per_slot", 3)),
+                router_config=prefill_cfg.get("domain_router", {}),
+                arbiter_config={
+                    "domain_priority": prefill_cfg.get("domain_priority", {}),
+                    "slot_domain_priority": prefill_cfg.get(
+                        "slot_domain_priority", {}
+                    ),
+                    "domain_penalty": prefill_cfg.get("domain_penalty", 0.2),
+                },
             ),
             EntityEnricherMiddleware(
                 device_resolver=device_resolver,

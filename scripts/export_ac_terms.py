@@ -59,6 +59,7 @@ def _choose(*values: Any) -> str:
 
 def _term_key(term: dict[str, Any]) -> str:
     return (
+        f"{_clean_text(term.get('domain')).lower()}|"
         f"{_clean_text(term.get('slot')).lower()}|"
         f"{_clean_text(term.get('value')).lower()}|"
         f"{_clean_text(term.get('entity_id')).lower()}|"
@@ -81,6 +82,7 @@ def _merge_terms(
             continue
         cleaned = {
             "term": term_text,
+            "domain": _clean_text(raw.get("domain")) or None,
             "slot": slot,
             "value": raw.get("value"),
             "entity_id": _clean_text(raw.get("entity_id")) or None,
@@ -106,7 +108,7 @@ def _merge_terms(
     for item in items:
         aliases = [alias for alias in _clean_aliases(item.get("aliases", [])) if alias != item["term"]]
         item["aliases"] = aliases
-    items.sort(key=lambda item: (item["slot"], item["term"]))
+    items.sort(key=lambda item: (str(item.get("domain", "")), item["slot"], item["term"]))
     return items
 
 
@@ -228,6 +230,7 @@ def _device_terms(docs: list[dict[str, Any]], *, include_ip: bool) -> list[dict[
         terms.append(
             {
                 "term": entity_name,
+                "domain": "device",
                 "slot": "device_id",
                 "value": entity_id,
                 "entity_id": entity_id,
@@ -243,6 +246,7 @@ def _device_terms(docs: list[dict[str, Any]], *, include_ip: bool) -> list[dict[
                 terms.append(
                     {
                         "term": ip,
+                        "domain": "device",
                         "slot": "device_id",
                         "value": entity_id,
                         "entity_id": entity_id,
@@ -286,6 +290,7 @@ def _region_terms(docs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         terms.append(
             {
                 "term": entity_name,
+                "domain": "region",
                 "slot": "region_id",
                 "value": entity_id,
                 "entity_id": entity_id,

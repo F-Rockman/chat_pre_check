@@ -24,7 +24,7 @@
 - `interfaces`：API / CLI / livemain 入口，接收开关参数
 - `bootstrap`：组装引擎与依赖，完成后端客户端注入
 - `application`：中间件流水线（Scope/Template/Enrich 等）
-- `infrastructure`：检索客户端、检索器、配置加载、索引构建脚本
+- `infrastructure`：检索客户端、检索器、统一能力配置加载、索引构建脚本
 
 ### 3.2 关键组件
 - 后端选择工厂：`src/chat_pre_check/infrastructure/resolvers/search_client_factory.py`
@@ -42,14 +42,15 @@
 | `opensearch_client.py` | OS 实现 | `knn_vector` 索引、`knn` 查询、`text_search`、重试 |
 | `elasticsearch_client.py` | ES 实现 | `dense_vector` 索引、`knn` 查询 + `script_score` 回退、重试 |
 | `opensearch_vector_retriever.py` | 后端无关检索器 | 调用 `client.knn_search/text_search`，进行融合打分 |
-| `infrastructure/extractors/ac_prefill.py` | AC 提参算法 | AC 自动机构建、词表加载、槽位候选输出 |
-| `application/middlewares/param_prefill.py` | 预提参中间件 | 把 AC 命中结果写入 `ctx.slots/ctx.entities` |
+| `infrastructure/extractors/ac_prefill.py` | AC 提参算法 | 分域 AC 管理器、词表加载、候选合并 |
+| `application/middlewares/param_prefill.py` | 预提参中间件 | 域路由 + 结果仲裁 + 上下文写入 |
 | `device_resolver.py` / `region_resolver.py` | 实体解析 | 依赖 `client.text_search`，对设备/地域候选归一化 |
 | `interfaces/api/app.py` | API 入口 | 支持 `CHAT_PRE_CHECK_SEARCH_BACKEND` |
 | `interfaces/cli/main.py` | CLI 入口 | 支持 `--search-backend` |
 | `livemain.py` | 运维/联调入口 | 统一后端探活与索引存在性检查 |
 | `scripts/build_vector_indices.py` | 索引构建 | 支持 `--search-backend`，按后端建索引并写入 |
 | `scripts/export_ac_terms.py` | AC 词表导出 | 从设备/地域索引导出词条并生成 `ac_terms.json` |
+| `configs/capabilities.json` | 统一能力定义 | 合并 scene/template/seed_case/recommendation/slot_policy |
 | `configs/vector.json` | 配置默认值 | `search_backend` 默认配置 |
 | `validator.py` | 配置校验 | 校验 `search_backend` 可选值合法性 |
 
@@ -85,6 +86,7 @@
 
 ### 6.1 引擎启动流程（API/CLI/livemain 共用）
 1. `load_app_config` 读取 `vector.json`
+   - 同时加载 `capabilities.json` 并编译成运行期对象
 2. `build_engine` 根据 `os_url` 决定是否走远端检索
 3. 若走远端：
    - 调用 `build_search_client` 选择 ES/OS 客户端
@@ -132,7 +134,7 @@
 | 1 | `NormalizeMiddleware` | 文本归一化（去首尾空格、统一大小写、标点归一） | 写入 `ctx.norm_text`；继续 |
 | 2 | `InputGuardMiddleware` | 校验输入长度上下限 | 空输入 -> `CLARIFY`；超长 -> `REFUSE`；否则继续 |
 | 3 | `EntityExtractorMiddleware` | 规则抽取实体（时间、topN、严重级别、意图等） | 写入 `ctx.entities/ctx.slots`；继续 |
-| 4 | `ParamPrefillMiddleware` | 基于 AC 状态机匹配词库（设备/地域/IP/告警域词） | 命中后写入 `ctx.entities`，满足阈值时可自动落槽位；未命中继续 |
+| 4 | `ParamPrefillMiddleware` | 分域 AC：先路由域，再匹配，再仲裁（设备/地域/KPI/告警） | 命中后写入 `ctx.entities`，满足阈值时可自动落槽位；未命中继续 |
 | 5 | `EntityEnricherMiddleware` | 调用 `device/region resolver` 做实体候选补全 | 正常合并候选并落槽位；resolver 异常时若已有预提参则继续，否则 `REFUSE(data_unavailable)` |
 | 6 | `PolicyGuardMiddleware` | 关键词与权限策略拦截 | 命中策略/权限/域外词 -> `REFUSE`；否则继续 |
 | 7 | `ScopeGateMiddleware` | 场景识别与范围判定（规则分 + 向量分 + 实体覆盖分融合） | 低于 `T_scope` -> `REFUSE(unsupported_domain)`；与次高分差小于 `T_scene_gap` -> `CLARIFY(scene)`；否则写入 `ctx.scene` 并继续 |
@@ -144,7 +146,7 @@
 
 #### 6.4.3 每一步“干了啥”的核心技术点
 - `ScopeGate`：不是只靠向量召回，而是把 `rule/vector/entity` 三路分数做加权，减少单一路径误判。
-- `ParamPrefill`：AC 匹配把“可确定参数”提前落到上下文，减少后续大模型或远端检索依赖。
+- `ParamPrefill`：分域 AC 把“可确定参数”提前落到上下文，并通过域仲裁降低跨表冲突。
 - `SeedScopeGuard`：在“场景已判定”后再做能力边界裁剪，防止路由到尚未开放的 NL2SQL 能力面。
 - `SlotClarifier`：支持 `required_slots + conditional_slots + defaults`，不是固定字段表。
 - `TemplateMatcher`：支持 `negative_keywords` 将规则分直接置 0，避免反向语义误命中模板。
@@ -206,13 +208,26 @@
     "commit_score": 0.95,
     "min_gap": 0.05,
     "max_candidates_per_slot": 3,
+    "domain_penalty": 0.2,
+    "domain_priority": { "device": 1.0, "region": 0.9, "kpi": 0.8, "alarm": 0.7 },
+    "slot_domain_priority": { "device_id": ["device"], "region_id": ["region"] },
+    "domain_router": {
+      "enabled": true,
+      "max_domains": 2,
+      "scene_domains": { "device.query": ["device", "region"] },
+      "keyword_domains": { "kpi": ["cpu", "内存", "时延"] }
+    },
     "skip_remote_resolver_when_prefilled": true
   }
 }
 ```
 
+`configs/capabilities.json`：
+- 单一业务配置源：`capability -> scope/slots/templates/seed_cases/recommendations/slot_policy`
+- 运行期由 loader 编译为 `scenes/templates/cases/seed_cases/slot_policies`
+
 `configs/ac_terms.json`（可由服务数据库导出）：
-- 词条字段：`term/aliases/slot/value/entity_id/entity_name/score/metadata`
+- 词条字段：`term/domain/aliases/slot/value/entity_id/entity_name/score/metadata`
 - 典型槽位：`region_id`、`device_id`、`object_scope`、`severity`、`alarm_status`
 
 ### 8.2 环境变量

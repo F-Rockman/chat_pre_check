@@ -1,8 +1,5 @@
 from __future__ import annotations
-
-import json
 import re
-from pathlib import Path
 from typing import Any
 
 from chat_pre_check.application.services.scoring import (
@@ -214,11 +211,10 @@ class LocalRegionResolver:
 
 def build_local_fallback_engine(config_dir: str = "configs"):
     config = load_app_config(config_dir)
-    seed_cases = _load_seed_cases(Path(config_dir) / "seed_cases.json")
     retriever = LocalHeuristicRetriever(
         scenes=config.scenes,
         templates=config.templates,
-        seed_cases=seed_cases,
+        seed_cases=config.seed_cases,
     )
     return build_engine(
         config_dir=config_dir,
@@ -226,15 +222,3 @@ def build_local_fallback_engine(config_dir: str = "configs"):
         device_resolver_override=LocalDeviceResolver(),
         region_resolver_override=LocalRegionResolver(),
     )
-
-
-def _load_seed_cases(path: Path) -> list[dict[str, Any]]:
-    if not path.exists():
-        return []
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return []
-    if not isinstance(data, list):
-        return []
-    return [item for item in data if isinstance(item, dict)]

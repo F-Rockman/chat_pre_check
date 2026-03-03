@@ -3,10 +3,10 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from typing import Any
 
 from chat_pre_check.infrastructure.config.loader import load_app_config
 from chat_pre_check.infrastructure.seed_cases import (
-    dump_seed_cases,
     import_seed_cases,
     load_seed_case_rows,
     merge_seed_cases,
@@ -15,12 +15,12 @@ from chat_pre_check.infrastructure.seed_cases import (
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Import seed cases from CSV/JSON/JSONL into configs/seed_cases.json"
+        description="Import seed cases from CSV/JSON/JSONL into configs/capabilities.json"
     )
     parser.add_argument("--input", required=True, help="Input file path (.csv/.json/.jsonl)")
     parser.add_argument("--input-format", default="auto", choices=["auto", "csv", "json", "jsonl"])
     parser.add_argument("--config-dir", default="configs")
-    parser.add_argument("--output", default="configs/seed_cases.json")
+    parser.add_argument("--output", default="configs/capabilities.json")
     parser.add_argument("--merge-mode", default="replace", choices=["replace", "upsert"])
     parser.add_argument(
         "--on-duplicate",
@@ -31,7 +31,7 @@ def main() -> None:
     parser.add_argument(
         "--allow-unknown-scene",
         action="store_true",
-        help="Allow scene_id not found in scenes.json",
+        help="Allow scene_id not found in capabilities definition",
     )
     parser.add_argument(
         "--error-report",
@@ -55,14 +55,16 @@ def main() -> None:
         on_duplicate=args.on_duplicate,
     )
 
-    existing = []
-    if output_path.exists():
-        existing_data = json.loads(output_path.read_text(encoding="utf-8"))
-        if isinstance(existing_data, list):
-            existing = existing_data
+    capabilities_payload = _load_capabilities_payload(output_path)
+    existing = list(config.seed_cases)
 
     merged = merge_seed_cases(existing, imported, mode=args.merge_mode)
-    dump_seed_cases(output_path, merged)
+    _apply_seed_cases_to_capabilities(capabilities_payload, merged)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        json.dumps(capabilities_payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
 
     if args.error_report:
         Path(args.error_report).write_text(
@@ -78,6 +80,54 @@ def main() -> None:
     )
     if result.errors and not args.strict:
         print(f"invalid_rows_saved={args.error_report or 'N/A'}")
+
+
+def _load_capabilities_payload(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {"version": "v1", "capabilities": []}
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if isinstance(payload, dict):
+        payload.setdefault("capabilities", [])
+        return payload
+    raise ValueError("capabilities file must be object")
+
+
+def _apply_seed_cases_to_capabilities(
+    payload: dict[str, Any],
+    seed_cases: list[dict[str, Any]],
+) -> None:
+    capabilities = payload.get("capabilities", [])
+    if not isinstance(capabilities, list):
+        raise ValueError("capabilities.capabilities must be list")
+
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for item in seed_cases:
+        scene_id = str(item.get("scene_id", "")).strip()
+        if not scene_id:
+            continue
+        grouped.setdefault(scene_id, []).append(dict(item))
+
+    for capability in capabilities:
+        if not isinstance(capability, dict):
+            continue
+        capability_id = str(capability.get("capability_id", "")).strip()
+        cases = grouped.get(capability_id, [])
+        normalized: list[dict[str, Any]] = []
+        for case in cases:
+            normalized.append(
+                {
+                    "case_id": case.get("case_id"),
+                    "label": case.get("label"),
+                    "text": case.get("text"),
+                    "route_type": case.get("route_type", "route_nl2sql"),
+                    "tags": case.get("tags", []),
+                    "priority": case.get("priority", 100),
+                    "owner": case.get("owner", ""),
+                    "risk_level": case.get("risk_level", "medium"),
+                    "enabled": case.get("enabled", True),
+                }
+            )
+        capability["seed_cases"] = normalized
 
 
 if __name__ == "__main__":

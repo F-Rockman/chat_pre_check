@@ -1,6 +1,7 @@
 [
   {
     "term": "华东",
+    "domain": "region",
     "slot": "region_id",
     "value": "east_cn",
     "entity_id": "east_cn",
@@ -8,68 +9,56 @@
     "aliases": [
       "华东区"
     ],
-    "score": 0.99,
-    "metadata": {
-      "domain": "region"
-    }
+    "score": 0.99
   },
   {
     "term": "华南",
+    "domain": "region",
     "slot": "region_id",
     "value": "south_cn",
     "entity_id": "south_cn",
     "entity_name": "华南",
-    "score": 0.99,
-    "metadata": {
-      "domain": "region"
-    }
+    "score": 0.99
   },
   {
     "term": "华北",
+    "domain": "region",
     "slot": "region_id",
     "value": "north_cn",
     "entity_id": "north_cn",
     "entity_name": "华北",
-    "score": 0.99,
-    "metadata": {
-      "domain": "region"
-    }
+    "score": 0.99
   },
   {
     "term": "广州",
+    "domain": "region",
     "slot": "region_id",
     "value": "region_gz",
     "entity_id": "region_gz",
     "entity_name": "广州",
-    "score": 0.99,
-    "metadata": {
-      "domain": "region"
-    }
+    "score": 0.99
   },
   {
     "term": "北京",
+    "domain": "region",
     "slot": "region_id",
     "value": "region_bj",
     "entity_id": "region_bj",
     "entity_name": "北京",
-    "score": 0.99,
-    "metadata": {
-      "domain": "region"
-    }
+    "score": 0.99
   },
   {
     "term": "10.2.3.4",
+    "domain": "device",
     "slot": "device_id",
     "value": "dev_10_2_3_4",
     "entity_id": "dev_10_2_3_4",
     "entity_name": "设备10.2.3.4",
-    "score": 0.99,
-    "metadata": {
-      "domain": "device"
-    }
+    "score": 0.99
   },
   {
     "term": "设备A",
+    "domain": "device",
     "slot": "device_id",
     "value": "dev_a",
     "entity_id": "dev_a",
@@ -77,45 +66,62 @@
     "aliases": [
       "设备a"
     ],
-    "score": 0.95,
-    "metadata": {
-      "domain": "device"
-    }
+    "score": 0.95
   },
   {
     "term": "核心网",
+    "domain": "alarm",
     "slot": "object_scope",
     "value": "core_network",
     "score": 0.95
   },
   {
     "term": "全网",
+    "domain": "alarm",
     "slot": "object_scope",
     "value": "network",
     "score": 0.95
   },
   {
     "term": "未恢复",
+    "domain": "alarm",
     "slot": "alarm_status",
     "value": "active",
     "score": 0.95
   },
   {
     "term": "已恢复",
+    "domain": "alarm",
     "slot": "alarm_status",
     "value": "closed",
     "score": 0.95
   },
   {
     "term": "严重",
+    "domain": "alarm",
     "slot": "severity",
     "value": "critical",
     "score": 0.95
   },
   {
     "term": "次严重",
+    "domain": "alarm",
     "slot": "severity",
     "value": "major",
     "score": 0.95
+  },
+  {
+    "term": "时延",
+    "domain": "kpi",
+    "slot": "metric",
+    "value": "latency",
+    "score": 0.9
+  },
+  {
+    "term": "丢包率",
+    "domain": "kpi",
+    "slot": "metric",
+    "value": "packet_loss",
+    "score": 0.9
   }
 ]

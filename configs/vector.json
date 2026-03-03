@@ -41,6 +41,44 @@
     "default_word_boundary": true,
     "min_term_length": 2,
     "max_matches": 200,
+    "domain_penalty": 0.2,
+    "domain_priority": {
+      "device": 1.0,
+      "region": 0.9,
+      "alarm": 0.7,
+      "kpi": 0.8,
+      "default": 0.5
+    },
+    "slot_domain_priority": {
+      "device_id": ["device"],
+      "region_id": ["region"],
+      "metric": ["kpi", "alarm"],
+      "severity": ["alarm"],
+      "alarm_status": ["alarm"]
+    },
+    "domain_router": {
+      "enabled": true,
+      "max_domains": 2,
+      "default_domains": ["device", "region", "alarm", "kpi"],
+      "scene_domains": {
+        "alarm.query": ["alarm", "region"],
+        "device.query": ["device", "region"],
+        "alarm.analysis": ["kpi", "alarm"],
+        "ticket.analysis": ["alarm", "region"]
+      },
+      "keyword_domains": {
+        "device": ["设备", "主机", "ip", "hostname"],
+        "region": ["区域", "地市", "华东", "华南", "华北", "北京", "广州", "上海", "深圳"],
+        "alarm": ["告警", "报警", "严重", "恢复", "未恢复"],
+        "kpi": ["kpi", "指标", "cpu", "内存", "带宽", "时延", "抖动", "丢包", "吞吐"]
+      },
+      "slot_domains": {
+        "device_id": ["device"],
+        "region_id": ["region"],
+        "metric": ["kpi"],
+        "severity": ["alarm"]
+      }
+    },
     "skip_remote_resolver_when_prefilled": true
   },
   "reindex_on_start": false

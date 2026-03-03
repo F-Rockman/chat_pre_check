@@ -10,7 +10,7 @@
 ## 2. 字段规范
 ### 2.1 必填字段
 1. `case_id`：唯一 ID，建议 `seed_<domain>_<intent>_<window>`，例如 `seed_alarm_topn_core_24h`
-2. `scene_id`：必须能映射 `configs/scenes.json` 中场景
+2. `scene_id`：必须能映射 `configs/capabilities.json` 中 `capability_id`
 3. `label`：给用户展示的短文案
 4. `text`：用于向量/文本召回的标准问法
 
@@ -43,7 +43,7 @@ python scripts/import_seed_cases.py \
   --input templates/seed_cases_template.csv \
   --input-format csv \
   --config-dir configs \
-  --output configs/seed_cases.json \
+  --output configs/capabilities.json \
   --merge-mode replace \
   --on-duplicate error
 ```
@@ -54,7 +54,7 @@ python scripts/import_seed_cases.py \
   --input templates/seed_cases_template.jsonl \
   --input-format jsonl \
   --config-dir configs \
-  --output configs/seed_cases.json \
+  --output configs/capabilities.json \
   --merge-mode upsert \
   --on-duplicate keep_last
 ```
@@ -82,7 +82,7 @@ python scripts/import_seed_cases.py \
 
 2. `--merge-mode`
 - `replace`：输出仅使用当前导入
-- `upsert`：按 `case_id` 合并到已有 `seed_cases.json`
+- `upsert`：按 `case_id` 合并到已有 `capabilities.json`
 
 ## 6. 质量门禁建议（1000+）
 1. 唯一性：`case_id` 全局唯一
@@ -93,7 +93,7 @@ python scripts/import_seed_cases.py \
 
 ## 7. 生产发布流程建议
 1. 业务同学在 CSV/JSONL 模板填充
-2. 导入脚本生成 `configs/seed_cases.json`
+2. 导入脚本写入 `configs/capabilities.json` 中对应 `capability.seed_cases`
 3. 向量索引构建：
 ```bash
 python scripts/build_vector_indices.py --search-url http://localhost:9200 --config-dir configs
