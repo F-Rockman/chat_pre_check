@@ -148,7 +148,7 @@
 - `ScopeGate`：不是只靠向量召回，而是把 `rule/vector/entity` 三路分数做加权，减少单一路径误判。
 - `ParamPrefill`：分域 AC 把“可确定参数”提前落到上下文，并通过域仲裁降低跨表冲突。
 - `SeedScopeGuard`：在“场景已判定”后再做能力边界裁剪，防止路由到尚未开放的 NL2SQL 能力面。
-- `SlotClarifier`：支持 `required_slots + conditional_slots + defaults`，不是固定字段表。
+- `SlotClarifier`：支持 `slots.required + slots.conditional + slots.defaults`，不是固定字段表。
 - `TemplateMatcher`：支持 `negative_keywords` 将规则分直接置 0，避免反向语义误命中模板。
 
 #### 6.4.4 输出

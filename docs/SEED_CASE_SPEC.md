@@ -28,14 +28,14 @@
 
 ## 3. CSV/JSON 模板
 模板文件：
-- [seed_cases_template.csv](D:/GitHub/chat_pre_check/templates/seed_cases_template.csv)
-- [seed_cases_template.jsonl](D:/GitHub/chat_pre_check/templates/seed_cases_template.jsonl)
+- [seed_cases_template.csv](../templates/seed_cases_template.csv)
+- [seed_cases_template.jsonl](../templates/seed_cases_template.jsonl)
 
 CSV 中 `slots_json` 需是合法 JSON 对象字符串。
 
 ## 4. 批量导入脚本
 脚本：
-- [import_seed_cases.py](D:/GitHub/chat_pre_check/scripts/import_seed_cases.py)
+- [import_seed_cases.py](../scripts/import_seed_cases.py)
 
 ### 4.1 CSV 导入（替换模式）
 ```bash
@@ -94,6 +94,7 @@ python scripts/import_seed_cases.py \
 ## 7. 生产发布流程建议
 1. 业务同学在 CSV/JSONL 模板填充
 2. 导入脚本写入 `configs/capabilities.json` 中对应 `capability.seed_cases`
+   - 不再维护独立 `configs/seed_cases.json`
 3. 向量索引构建：
 ```bash
 python scripts/build_vector_indices.py --search-url http://localhost:9200 --config-dir configs

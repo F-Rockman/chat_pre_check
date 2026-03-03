@@ -36,4 +36,5 @@
 
 ### Docs
 - Updated README and guides to reflect unified config model and new import/export paths.
-
+- Unified wording from OpenSearch-only to generic search backend (ES/OS) where applicable.
+- Replaced machine-local absolute doc links with repository-relative paths.

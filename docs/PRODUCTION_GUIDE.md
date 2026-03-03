@@ -36,7 +36,7 @@ python scripts/build_vector_indices.py --search-url http://localhost:9200 --sear
 uvicorn chat_pre_check.interfaces.api.app:create_app --factory --reload
 ```
 
-### 2.1 无 OpenSearch 运行可行性
+### 2.1 无检索后端运行可行性（本地 fallback）
 可行，但建议用于以下场景：
 - PoC、离线环境、低成本部署、边缘节点
 - 能力范围较收敛，且接受召回率低于向量检索版
@@ -44,6 +44,8 @@ uvicorn chat_pre_check.interfaces.api.app:create_app --factory --reload
 当前已提供本地 fallback 能力（启发式检索 + 规则解析）：
 ```bash
 python livemain.py --without-opensearch
+# 等价参数：
+# python livemain.py --without-search-backend
 ```
 
 ### 2.2 检索后端部署切换说明（ES 当前 / OS 下一版）
@@ -158,31 +160,32 @@ python livemain.py --search-backend opensearch --os-url http://<os-host>:9200
 - `configs/vector.json`（含 `search_backend` 开关：`opensearch` / `elasticsearch`）
 
 seed_case 批量导入与字段规范见：
-- [SEED_CASE_SPEC.md](D:/GitHub/chat_pre_check/docs/SEED_CASE_SPEC.md)
+- [SEED_CASE_SPEC.md](./SEED_CASE_SPEC.md)
 
-### 4.1 Scene（场景）
-每个 `capability` 内的 `slots/scope` 定义能力边界、必填槽位、默认值、追问策略。
+### 4.1 Capability（场景能力）
+每个 `capability` 内的 `scope/slots` 定义能力边界、必填槽位、默认值、追问策略；运行期会将 `capability_id` 编译映射为 `scene_id`。
 
 关键字段：
-- `scene_id`
-- `required_slots`
-- `conditional_slots`
-- `defaults`
-- `keywords` / `examples`
+- `capability_id`（运行期映射为 `scene_id`）
+- `scope.keywords` / `scope.examples`
+- `slots.required`
+- `slots.conditional`
+- `slots.defaults`
+- `slots.clarify_policy`
 
 实践建议：
-- `required_slots` 只放对路由有决定性的槽位。
-- 通过 `defaults` 减少追问轮次（如 `time_range=last_24h`）。
-- `conditional_slots` 用于意图触发型必填（如 `intent=trend` 时必须有 `device_id`）。
+- `slots.required` 只放对路由有决定性的槽位。
+- 通过 `slots.defaults` 减少追问轮次（如 `time_range=last_24h`）。
+- `slots.conditional` 用于意图触发型必填（如 `intent=trend` 时必须有 `device_id`）。
 
 ### 4.2 Template（模板）
 每个 `capability.templates[*]` 定义“稳定可控查询”。
 
 关键字段：
-- `template_id`, `scene_id`
+- `template_id`（`scene_id` 由父 `capability_id` 在编译期注入）
 - `keywords`, `negative_keywords`
 - `slot_schema.required/optional`
-- `examples`
+- `examples`, `enabled`
 
 实践建议：
 - `negative_keywords` 必须覆盖容易误命中的反例词（如“相关性”“同比”）。
@@ -227,7 +230,7 @@ seed_case 批量导入与字段规范见：
 ## 6. 如何定义拒答规则
 拒答分为两类：
 - 业务拒答：未知域、不支持域、权限不足、策略拦截
-- 系统拒答：OpenSearch/向量检索失败、流水线异常
+- 系统拒答：检索后端（ES/OS）/向量检索失败、流水线异常
 
 要求：
 - 所有拒答必须附带 3~6 个可点击推荐。
@@ -261,7 +264,7 @@ seed_case 批量导入与字段规范见：
 - 用 `negative_keywords` 抑制跨模板误命中。
 
 ## 8. 测试策略
-### 8.1 默认测试（不依赖 OpenSearch）
+### 8.1 默认测试（不依赖检索后端）
 ```bash
 python -m pytest -q -m "not integration"
 ```
@@ -276,7 +279,7 @@ python -m pytest -q tests/acceptance/test_routing_acceptance.py
 python -m pytest -q tests/acceptance/test_network_ops_extended.py
 ```
 
-### 8.4 集成测试（真实 OpenSearch）
+### 8.4 集成测试（真实检索后端：OpenSearch/Elasticsearch）
 ```bash
 python -m pytest -q -m integration --os-base-url http://localhost:9200
 ```

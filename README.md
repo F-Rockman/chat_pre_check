@@ -3,7 +3,7 @@
 对话场景前置校验引擎（拒答/推荐、追问、模板命中、NL2SQL 路由）。
 
 ## 快速 Demo（本地）
-直接跑内置 demo（离线 mock，不依赖 OpenSearch）：
+直接跑内置 demo（离线 mock，不依赖检索后端）：
 ```bash
 python main.py
 ```
@@ -19,14 +19,18 @@ python livemain.py
 python livemain.py --search-backend elasticsearch --os-url http://localhost:9200
 ```
 
-强制无 OpenSearch 模式：
+强制无检索后端模式：
 ```bash
 python livemain.py --without-opensearch
+# 等价参数：
+# python livemain.py --without-search-backend
 ```
 
 必须用检索后端（不可用则退出）：
 ```bash
 python livemain.py --require-opensearch
+# 等价参数：
+# python livemain.py --require-search-backend
 ```
 
 跑网络运维 demo 集：
@@ -46,8 +50,8 @@ python main.py --mode live --os-url http://localhost:9200 --demo-set all
 
 ## 核心能力
 - 洋葱架构：`domain -> application -> infrastructure -> interfaces`
-- 决策链路：`Normalize -> Extract -> Enrich -> Policy -> Scope -> Scene -> Clarify -> Template -> NL2SQL`
-- 规则 + 向量融合（`intfloat/multilingual-e5-base` + OpenSearch）
+- 决策链路：`Normalize -> Extract -> Prefill(AC) -> Enrich -> Policy -> Scope -> Scene -> SeedGuard -> Clarify -> Template -> NL2SQL`
+- 规则 + 向量融合（`intfloat/multilingual-e5-base` + ES/OS 检索后端）
 - FastAPI 接口：`POST /v1/precheck/route`
 - 20 条验收样例（拒答、追问、模板命中、NL2SQL 分流）
 
