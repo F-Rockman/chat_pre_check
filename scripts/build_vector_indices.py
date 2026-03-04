@@ -3,14 +3,17 @@ from __future__ import annotations
 import argparse
 from typing import Any
 
+import numpy as np
+
+from chat_pre_check.domain.interfaces import Embedder
 from chat_pre_check.infrastructure.config.loader import load_app_config
-from chat_pre_check.infrastructure.embedding.e5_embedder import E5Embedder
+from chat_pre_check.infrastructure.embedding.factory import build_embedder_from_vector_config
 from chat_pre_check.infrastructure.resolvers.search_client_factory import (
     build_search_client,
 )
 
 
-def build_scene_docs(scenes: list[dict[str, Any]], embedder: E5Embedder) -> list[dict[str, Any]]:
+def build_scene_docs(scenes: list[dict[str, Any]], embedder: Embedder) -> list[dict[str, Any]]:
     docs: list[dict[str, Any]] = []
     texts: list[str] = []
     ids: list[str] = []
@@ -38,7 +41,7 @@ def build_scene_docs(scenes: list[dict[str, Any]], embedder: E5Embedder) -> list
 
 
 def build_template_docs(
-    templates: list[dict[str, Any]], embedder: E5Embedder
+    templates: list[dict[str, Any]], embedder: Embedder
 ) -> list[dict[str, Any]]:
     docs: list[dict[str, Any]] = []
     texts: list[str] = []
@@ -68,7 +71,7 @@ def build_template_docs(
     return docs
 
 
-def build_seed_case_docs(seed_cases: list[dict[str, Any]], embedder: E5Embedder) -> list[dict[str, Any]]:
+def build_seed_case_docs(seed_cases: list[dict[str, Any]], embedder: Embedder) -> list[dict[str, Any]]:
     if not seed_cases:
         return []
     texts = [case["text"] for case in seed_cases]
@@ -123,10 +126,7 @@ def main() -> None:
 
     config = load_app_config(args.config_dir)
     vector_cfg = config.vector
-    embedder = E5Embedder(
-        model_name=vector_cfg["model_name"],
-        device=vector_cfg.get("device", "cpu"),
-    )
+    embedder, embedding_spec = build_embedder_from_vector_config(vector_cfg)
     backend, client = build_search_client(
         vector_cfg=vector_cfg,
         base_url=args.os_url,
@@ -139,9 +139,14 @@ def main() -> None:
     template_docs = build_template_docs(config.templates, embedder)
     seed_docs = build_seed_case_docs(config.seed_cases, embedder)
 
-    client.ensure_vector_index(vector_cfg["scene_index"], dimension=768)
-    client.ensure_vector_index(vector_cfg["template_index"], dimension=768)
-    client.ensure_vector_index(vector_cfg["seed_case_index"], dimension=768)
+    _assert_doc_dimension(scene_docs, embedding_spec.dimension, "scene_docs")
+    _assert_doc_dimension(template_docs, embedding_spec.dimension, "template_docs")
+    if seed_docs:
+        _assert_doc_dimension(seed_docs, embedding_spec.dimension, "seed_docs")
+
+    client.ensure_vector_index(vector_cfg["scene_index"], dimension=embedding_spec.dimension)
+    client.ensure_vector_index(vector_cfg["template_index"], dimension=embedding_spec.dimension)
+    client.ensure_vector_index(vector_cfg["seed_case_index"], dimension=embedding_spec.dimension)
     client.bulk_index(vector_cfg["scene_index"], scene_docs)
     client.bulk_index(vector_cfg["template_index"], template_docs)
     if seed_docs:
@@ -150,8 +155,19 @@ def main() -> None:
         f"indexed scene_docs={len(scene_docs)} template_docs={len(template_docs)} "
         f"seed_docs={len(seed_docs)} into "
         f"{vector_cfg['scene_index']}/{vector_cfg['template_index']}/{vector_cfg['seed_case_index']} "
-        f"(backend={backend})"
+        f"(backend={backend}, embed_provider={embedding_spec.provider}, dim={embedding_spec.dimension})"
     )
+
+
+def _assert_doc_dimension(docs: list[dict[str, Any]], expected_dim: int, doc_name: str) -> None:
+    if not docs:
+        return
+    vector = docs[0].get("vector", [])
+    actual_dim = int(np.asarray(vector, dtype=np.float32).shape[0])
+    if actual_dim != expected_dim:
+        raise ValueError(
+            f"{doc_name} vector dimension mismatch: expected={expected_dim} actual={actual_dim}"
+        )
 
 
 if __name__ == "__main__":

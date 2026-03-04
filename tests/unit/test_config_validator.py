@@ -83,3 +83,26 @@ def test_validator_rejects_invalid_flow_router_llm_low_confidence_flag() -> None
     config.rules["flow_router"]["llm_on_low_confidence"] = "yes"
     with pytest.raises(ValueError, match="llm_on_low_confidence"):
         validate_config(config)
+
+
+def test_validator_rejects_invalid_embedding_provider() -> None:
+    config = _clone_config(load_app_config("configs"))
+    config.vector["embedding"]["provider"] = "unknown_provider"
+    with pytest.raises(ValueError, match="embedding.provider"):
+        validate_config(config)
+
+
+def test_validator_rejects_openai_embedding_without_dimension() -> None:
+    config = _clone_config(load_app_config("configs"))
+    config.vector["embedding"]["provider"] = "openai_compatible"
+    config.vector["embedding"]["base_url"] = "https://example.com/v1"
+    config.vector["embedding"]["dimension"] = 0
+    with pytest.raises(ValueError, match="embedding.dimension"):
+        validate_config(config)
+
+
+def test_validator_rejects_invalid_llm_response_content_path() -> None:
+    config = _clone_config(load_app_config("configs"))
+    config.rules["llm"]["response_content_path"] = {"a": 1}
+    with pytest.raises(ValueError, match="response_content_path"):
+        validate_config(config)

@@ -49,6 +49,12 @@
   - Raised default LLM timeout from 700ms to 2500ms for better real-endpoint success rate.
   - Added flow-type normalization for non-standard LLM labels (e.g. `report_generation` -> `report`).
   - Added `flow_router.llm_on_low_confidence` switch (default `false`) to avoid unnecessary LLM calls on low-confidence/noisy inputs.
+- Added pluggable embedding runtime config:
+  - `vector.embedding` supports provider/model/dimension/prefix configuration.
+  - vector index builder now uses configured dimension instead of hardcoded `768`.
+  - bootstrap retriever embedder now resolves via embedding factory (ready for local ST or remote OpenAI-compatible embedding service).
+- Extended LLM client configurability for deployment variance:
+  - configurable auth header/prefix, endpoint path, request field names, response content path, and extra payload fields.
 
 ### Tests
 - Added API router thread-model unit test to verify `/v1/precheck/route` uses threadpool execution and preserves `RouteRequest` fields.

@@ -68,6 +68,12 @@ python scripts/build_vector_indices.py --search-url http://localhost:9200 --conf
 python scripts/build_vector_indices.py --search-url http://localhost:9200 --search-backend elasticsearch --config-dir configs
 ```
 
+Embedding 模型与维度通过 `configs/vector.json -> embedding` 控制（支持 768/512 等不同维度）：
+- `provider`: `sentence_transformers` / `openai_compatible`
+- `model`: 向量模型名
+- `dimension`: 向量维度（会用于 ES/OS 索引建模）
+- `query_prefix` / `passage_prefix`: 查询与文档前缀（E5 推荐保留）
+
 ## LLM 单次增强（可选）
 默认关闭；仅在分流不确定时单次调用，失败自动降级规则链路。
 
@@ -83,6 +89,7 @@ set CHAT_PRE_CHECK_LLM_API_KEY=<your_token>
 - 超时默认 2500ms（可配置）
 - 默认关闭思维链输出（`enable_thinking=false`）并启用 JSON 响应模式（`response_format_json=true`）
 - 默认只在“分流歧义”触发 LLM（`flow_router.llm_on_low_confidence=false`）
+- 支持接口字段可配（如 `endpoint_path/api_key_header/model_field/messages_field/max_tokens_field/response_content_path`）
 - 不依赖 LLM 也可正常运行
 
 ## 导出 AC 提参词表（数据库 -> ac_terms.json）

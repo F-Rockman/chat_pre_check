@@ -94,7 +94,7 @@ python scripts/build_vector_indices.py \
 | `configs/capabilities.json` | 业务能力定义（见 `CAPABILITIES_GUIDE.md`） |
 | `configs/rules.json` | 拒答、权限、输入边界规则 |
 | `configs/thresholds.json` | 各中间件阈值 |
-| `configs/vector.json` | 检索后端、索引名、融合权重、AC 预提参参数 |
+| `configs/vector.json` | 检索后端、Embedding、索引名、融合权重、AC 预提参参数 |
 | `configs/ac_terms.json` | AC 词表（设备/地域/KPI/告警等） |
 
 ## 5. 请求处理链路（业务视角）
@@ -105,16 +105,18 @@ python scripts/build_vector_indices.py \
 
 1. `Normalize`：文本归一化  
 2. `InputGuard`：长度边界校验  
-3. `EntityExtractor`：规则抽取时间/topN/意图等  
-4. `ParamPrefill(AC)`：AC 分域预提参，提前识别设备/地域/KPI/告警参数  
-5. `EntityEnricher`：远程 resolver 补齐实体候选  
-6. `PolicyGuard`：策略与权限拦截  
-7. `ScopeGate`：场景判定（规则分 + 向量分 + 实体分融合）  
-8. `SceneRouter`：场景同步/兜底  
-9. `SlotClarifier`：缺槽位则追问  
-10. `TemplateMatcher`：模板匹配（规则 + 向量 + 槽位适配）  
-11. `SeedScopeGuard`：仅在模板未命中、即将走 NL2SQL 时进行能力边界守卫（可开关）  
-12. `NL2SQLRouter`：模板未命中兜底
+3. `PolicyGuard`：策略与权限拦截  
+4. `FlowRouter`：query/report/direct/unknown 分流（可选单次 LLM 增强）  
+5. `EntityExtractor`：规则抽取时间/topN/意图等  
+6. `ParamPrefill(AC)`：AC 分域预提参，提前识别设备/地域/KPI/告警参数  
+7. `EntityEnricher`：远程 resolver 补齐实体候选  
+8. `ScopeGate`：场景判定（规则分 + 向量分 + 实体分融合）  
+9. `SceneRouter`：场景同步/兜底  
+10. `SlotClarifier`：缺槽位则追问  
+11. `ReportRouter`：报告流直通  
+12. `TemplateMatcher`：模板匹配（规则 + 向量 + 槽位适配）  
+13. `SeedScopeGuard`：仅在模板未命中、即将走 NL2SQL 时进行能力边界守卫（可开关）  
+14. `NL2SQLRouter`：模板未命中兜底
 
 输出：`RouteDecision`
 
@@ -156,7 +158,33 @@ python scripts/export_ac_terms.py \
 | `domain_penalty` | 跨域惩罚系数 |
 | `skip_remote_resolver_when_prefilled` | 预提参命中后是否跳过远程解析 |
 
-## 7. seed/intents 批量导入
+### 6.3 Embedding 配置（`vector.json -> embedding`）
+
+| 参数 | 说明 |
+|---|---|
+| `provider` | `sentence_transformers` / `openai_compatible` |
+| `model` | 向量模型名 |
+| `dimension` | 向量维度（会用于 ES/OS 索引建模） |
+| `query_prefix/passage_prefix` | 查询/文档编码前缀（E5 推荐保留） |
+| `base_url/endpoint_path` | 远程 Embedding 服务地址与路径（openai_compatible） |
+| `api_key_env` | 远程 Embedding 密钥环境变量名 |
+
+说明：构建索引脚本会使用 `embedding.dimension` 创建向量字段，避免 768/512 切换时索引错配。
+
+## 7. LLM 接口可变配置（`rules.json -> llm`）
+
+| 参数 | 说明 |
+|---|---|
+| `provider` | 当前支持 `openai_compatible` |
+| `base_url/model` | 模型服务地址与模型名 |
+| `base_url_env/model_env/api_key_env` | 环境变量映射 |
+| `endpoint_path` | 聊天接口路径 |
+| `api_key_header/api_key_prefix` | 鉴权 Header 名与前缀 |
+| `model_field/messages_field/max_tokens_field` | 请求体字段名映射 |
+| `response_content_path` | 响应内容路径（如 `choices.0.message.content`） |
+| `request_extra` | 供应商扩展字段（JSON 对象） |
+
+## 8. seed/intents 批量导入
 
 ```bash
 python scripts/import_seed_cases.py \
@@ -170,7 +198,7 @@ python scripts/import_seed_cases.py \
 
 导入目标是 `capability.intents`，不再维护独立 `seed_cases.json`。
 
-## 8. API 示例
+## 9. API 示例
 
 请求：
 
@@ -198,7 +226,7 @@ python scripts/import_seed_cases.py \
 }
 ```
 
-## 9. 测试与基线
+## 10. 测试与基线
 
 ### 9.1 单测
 
@@ -230,7 +258,7 @@ python scripts/eval_network_ops_benchmark.py \
   --min-stability 1.0
 ```
 
-## 10. 运维建议
+## 11. 运维建议
 
 建议最少监控以下指标：
 

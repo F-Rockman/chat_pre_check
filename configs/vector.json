@@ -1,5 +1,14 @@
 {
   "search_backend": "opensearch",
+  "embedding": {
+    "provider": "sentence_transformers",
+    "model": "intfloat/multilingual-e5-base",
+    "device": "cpu",
+    "dimension": 768,
+    "query_prefix": "query: ",
+    "passage_prefix": "passage: ",
+    "normalize_embeddings": true
+  },
   "model_name": "intfloat/multilingual-e5-base",
   "device": "cpu",
   "scene_index": "scene_vector_v1",

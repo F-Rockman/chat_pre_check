@@ -26,7 +26,7 @@ from chat_pre_check.application.services.slot_policy import SlotPolicyEngine
 from chat_pre_check.domain.enums import OutOfScopeReason
 from chat_pre_check.domain.models import RequestContext, SearchHit
 from chat_pre_check.infrastructure.config.loader import load_app_config
-from chat_pre_check.infrastructure.embedding.e5_embedder import E5Embedder
+from chat_pre_check.infrastructure.embedding.factory import build_embedder_from_vector_config
 from chat_pre_check.infrastructure.extractors.ac_prefill import build_slot_prefiller
 from chat_pre_check.infrastructure.llm.client import OpenAICompatibleChatClient
 from chat_pre_check.infrastructure.repositories.inmemory_repos import (
@@ -106,25 +106,39 @@ def build_engine(
     llm_cfg = config.rules.get("llm", {})
     llm_client = None
     if isinstance(llm_cfg, dict) and bool(llm_cfg.get("enabled", False)):
-        llm_api_key = os.getenv("CHAT_PRE_CHECK_LLM_API_KEY", "").strip()
+        llm_provider = str(llm_cfg.get("provider", "openai_compatible")).strip().lower()
+        if llm_provider != "openai_compatible":
+            raise ValueError(f"Unsupported llm provider: {llm_provider}")
+        llm_api_key_env = str(llm_cfg.get("api_key_env", "CHAT_PRE_CHECK_LLM_API_KEY"))
+        llm_base_url_env = str(llm_cfg.get("base_url_env", "CHAT_PRE_CHECK_LLM_BASE_URL"))
+        llm_model_env = str(llm_cfg.get("model_env", "CHAT_PRE_CHECK_LLM_MODEL"))
+        llm_api_key = os.getenv(llm_api_key_env, "").strip()
         if llm_api_key:
             llm_client = OpenAICompatibleChatClient(
                 base_url=str(
                     llm_cfg.get(
                         "base_url",
-                        os.getenv("CHAT_PRE_CHECK_LLM_BASE_URL", "https://coding.dashscope.aliyuncs.com/v1"),
+                        os.getenv(llm_base_url_env, "https://coding.dashscope.aliyuncs.com/v1"),
                     )
                 ),
                 api_key=llm_api_key,
                 model=str(
                     llm_cfg.get(
                         "model",
-                        os.getenv("CHAT_PRE_CHECK_LLM_MODEL", "qwen3.5-plus"),
+                        os.getenv(llm_model_env, "qwen3.5-plus"),
                     )
                 ),
                 timeout_ms=int(llm_cfg.get("timeout_ms", 2500)),
                 enable_thinking=bool(llm_cfg.get("enable_thinking", False)),
                 force_json_response=bool(llm_cfg.get("response_format_json", True)),
+                endpoint_path=str(llm_cfg.get("endpoint_path", "/chat/completions")),
+                api_key_header=str(llm_cfg.get("api_key_header", "Authorization")),
+                api_key_prefix=str(llm_cfg.get("api_key_prefix", "Bearer ")),
+                model_field=str(llm_cfg.get("model_field", "model")),
+                messages_field=str(llm_cfg.get("messages_field", "messages")),
+                max_tokens_field=str(llm_cfg.get("max_tokens_field", "max_tokens")),
+                request_extra=llm_cfg.get("request_extra", {}),
+                response_content_path=llm_cfg.get("response_content_path", ["choices", 0, "message", "content"]),
             )
     llm_assist = FlowLLMAssistService(
         client=llm_client,
@@ -157,12 +171,10 @@ def build_engine(
                     os.getenv("CHAT_PRE_CHECK_OS_RETRY_BACKOFF_SEC", "0.2")
                 ),
             )
+            embedder, _ = build_embedder_from_vector_config(vector_cfg)
             retriever = retriever or OpenSearchVectorRetriever(
                 client=client,
-                embedder=E5Embedder(
-                    model_name=vector_cfg["model_name"],
-                    device=vector_cfg.get("device", "cpu"),
-                ),
+                embedder=embedder,
                 scene_index=vector_cfg["scene_index"],
                 template_index=vector_cfg["template_index"],
                 seed_case_index=vector_cfg.get("seed_case_index"),

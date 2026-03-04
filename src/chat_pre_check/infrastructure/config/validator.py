@@ -17,8 +17,6 @@ REQUIRED_THRESHOLD_KEYS = {
     "resolver_min_gap",
 }
 REQUIRED_VECTOR_KEYS = {
-    "model_name",
-    "device",
     "scene_index",
     "template_index",
     "seed_case_index",
@@ -311,6 +309,7 @@ def _validate_vector(vector: dict[str, Any]) -> None:
         raise ValueError(
             "vector.search_backend must be one of: opensearch, elasticsearch, es"
         )
+    _validate_embedding_config(vector)
     fusion = vector.get("fusion_weights", {})
     for key in ("scene", "template"):
         if key not in fusion:
@@ -387,6 +386,55 @@ def _validate_vector(vector: dict[str, Any]) -> None:
                 raise ValueError(f"param_prefill.domain_router.{key} must be object")
 
 
+def _validate_embedding_config(vector: dict[str, Any]) -> None:
+    """embedding provider 配置校验，兼容旧 model_name/device 配置。"""
+    embedding = vector.get("embedding")
+    if embedding is not None and not isinstance(embedding, dict):
+        raise ValueError("vector.embedding must be object")
+    cfg = embedding if isinstance(embedding, dict) else {}
+
+    provider = str(cfg.get("provider", "sentence_transformers")).strip().lower()
+    if provider not in {"sentence_transformers", "e5", "hf_st", "openai_embedding", "openai_compatible"}:
+        raise ValueError(
+            "vector.embedding.provider must be one of: "
+            "sentence_transformers, e5, hf_st, openai_embedding, openai_compatible"
+        )
+
+    # 兼容旧字段 model_name/device。
+    model = str(cfg.get("model", vector.get("model_name", ""))).strip()
+    if not model:
+        raise ValueError("vector.embedding.model is required (or legacy vector.model_name)")
+
+    if "dimension" in cfg and int(cfg["dimension"]) < 1:
+        raise ValueError("vector.embedding.dimension must be >= 1")
+    if "timeout_ms" in cfg and int(cfg["timeout_ms"]) < 100:
+        raise ValueError("vector.embedding.timeout_ms must be >= 100")
+
+    for key in ("query_prefix", "passage_prefix", "endpoint_path", "base_url", "api_key_env"):
+        if key in cfg and not isinstance(cfg[key], str):
+            raise ValueError(f"vector.embedding.{key} must be str")
+
+    for key in ("normalize_embeddings",):
+        if key in cfg and not isinstance(cfg[key], bool):
+            raise ValueError(f"vector.embedding.{key} must be bool")
+
+    for key in ("request_extra",):
+        if key in cfg and not isinstance(cfg[key], dict):
+            raise ValueError(f"vector.embedding.{key} must be object")
+
+    for key in ("input_field", "model_field", "response_data_field", "response_vector_field"):
+        if key in cfg and not isinstance(cfg[key], str):
+            raise ValueError(f"vector.embedding.{key} must be str")
+
+    if provider in {"openai_embedding", "openai_compatible"}:
+        if "base_url" in cfg and not str(cfg.get("base_url", "")).strip():
+            raise ValueError("vector.embedding.base_url must not be empty for openai_compatible")
+        if int(cfg.get("dimension", 0) or 0) < 1:
+            raise ValueError(
+                "vector.embedding.dimension must be configured for openai_compatible provider"
+            )
+
+
 def _validate_rules(rules: dict[str, Any]) -> None:
     """规则配置基础校验。"""
     for key in (
@@ -441,6 +489,27 @@ def _validate_rules(rules: dict[str, Any]) -> None:
             raise ValueError("rules.llm.enable_thinking must be bool")
         if "response_format_json" in llm and not isinstance(llm["response_format_json"], bool):
             raise ValueError("rules.llm.response_format_json must be bool")
+        if "provider" in llm and str(llm["provider"]).strip().lower() not in {"openai_compatible"}:
+            raise ValueError("rules.llm.provider currently supports: openai_compatible")
+        for key in (
+            "api_key_env",
+            "base_url_env",
+            "model_env",
+            "endpoint_path",
+            "api_key_header",
+            "api_key_prefix",
+            "model_field",
+            "messages_field",
+            "max_tokens_field",
+        ):
+            if key in llm and not isinstance(llm[key], str):
+                raise ValueError(f"rules.llm.{key} must be str")
+        if "request_extra" in llm and not isinstance(llm["request_extra"], dict):
+            raise ValueError("rules.llm.request_extra must be object")
+        if "response_content_path" in llm and not isinstance(
+            llm["response_content_path"], (list, str)
+        ):
+            raise ValueError("rules.llm.response_content_path must be list or str")
 
     clarify = rules.get("clarify")
     if clarify is not None:
