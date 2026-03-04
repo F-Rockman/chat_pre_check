@@ -110,7 +110,11 @@ class PolicyGuardMiddleware:
         return RouteDecision(
             type=DecisionType.REFUSE,
             message=message,
+            flow_type=ctx.flow_type or ctx.context_flow_type,
             slots=dict(ctx.slots),
             options=self.recommendation_service.refuse_options(ctx, reason),
             out_of_scope_reason=reason,
+            clarify_round=ctx.clarify_round,
+            max_clarify_round=ctx.max_clarify_round,
+            next_action="refuse",
         )

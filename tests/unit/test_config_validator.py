@@ -56,3 +56,30 @@ def test_validator_rejects_intent_without_text_label_and_examples() -> None:
     with pytest.raises(ValueError, match="text/label/examples"):
         validate_config(config)
 
+
+def test_validator_rejects_invalid_flow_type() -> None:
+    config = _clone_config(load_app_config("configs"))
+    config.capabilities[0]["flow_type"] = "invalid_flow"
+    with pytest.raises(ValueError, match="flow_type"):
+        validate_config(config)
+
+
+def test_validator_rejects_invalid_llm_timeout() -> None:
+    config = _clone_config(load_app_config("configs"))
+    config.rules["llm"]["timeout_ms"] = 10
+    with pytest.raises(ValueError, match="timeout_ms"):
+        validate_config(config)
+
+
+def test_validator_rejects_invalid_llm_response_format_flag() -> None:
+    config = _clone_config(load_app_config("configs"))
+    config.rules["llm"]["response_format_json"] = "yes"
+    with pytest.raises(ValueError, match="response_format_json"):
+        validate_config(config)
+
+
+def test_validator_rejects_invalid_flow_router_llm_low_confidence_flag() -> None:
+    config = _clone_config(load_app_config("configs"))
+    config.rules["flow_router"]["llm_on_low_confidence"] = "yes"
+    with pytest.raises(ValueError, match="llm_on_low_confidence"):
+        validate_config(config)

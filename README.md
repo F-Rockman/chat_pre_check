@@ -50,7 +50,7 @@ python main.py --mode live --os-url http://localhost:9200 --demo-set all
 
 ## 核心能力
 - 洋葱架构：`domain -> application -> infrastructure -> interfaces`
-- 决策链路：`Normalize -> Extract -> Prefill(AC) -> Enrich -> Policy -> Scope -> Scene -> Clarify -> Template -> SeedGuard -> NL2SQL`
+- 决策链路：`Normalize -> InputGuard -> Policy -> FlowRouter -> Extract -> Prefill(AC) -> Enrich -> Scope -> Scene -> Clarify -> ReportRouter/Template -> SeedGuard -> NL2SQL`
 - 规则 + 向量融合（`intfloat/multilingual-e5-base` + ES/OS 检索后端）
 - FastAPI 接口：`POST /v1/precheck/route`
 - 20 条验收样例（拒答、追问、模板命中、NL2SQL 分流）
@@ -67,6 +67,23 @@ uvicorn chat_pre_check.interfaces.api.app:create_app --factory --reload
 python scripts/build_vector_indices.py --search-url http://localhost:9200 --config-dir configs
 python scripts/build_vector_indices.py --search-url http://localhost:9200 --search-backend elasticsearch --config-dir configs
 ```
+
+## LLM 单次增强（可选）
+默认关闭；仅在分流不确定时单次调用，失败自动降级规则链路。
+
+1. 配置开关：`configs/rules.json -> llm.enabled=true`
+2. 环境变量：
+```bash
+set CHAT_PRE_CHECK_LLM_BASE_URL=https://coding.dashscope.aliyuncs.com/v1
+set CHAT_PRE_CHECK_LLM_MODEL=qwen3.5-plus
+set CHAT_PRE_CHECK_LLM_API_KEY=<your_token>
+```
+3. 约束：
+- 每请求最多 1 次调用
+- 超时默认 2500ms（可配置）
+- 默认关闭思维链输出（`enable_thinking=false`）并启用 JSON 响应模式（`response_format_json=true`）
+- 默认只在“分流歧义”触发 LLM（`flow_router.llm_on_low_confidence=false`）
+- 不依赖 LLM 也可正常运行
 
 ## 导出 AC 提参词表（数据库 -> ac_terms.json）
 从检索库（设备/地域索引）导出词条并生成 `configs/ac_terms.json`：
@@ -139,4 +156,6 @@ python scripts/eval_network_ops_benchmark.py \
 ## 指导文档
 - capabilities 配置字段与业务建模指南：[docs/CAPABILITIES_GUIDE.md](docs/CAPABILITIES_GUIDE.md)
 - 部署、后端切换与链路架构指南：[docs/DEPLOYMENT_AND_ARCHITECTURE_GUIDE.md](docs/DEPLOYMENT_AND_ARCHITECTURE_GUIDE.md)
+- 对话式前置处理 V1 总体设计稿（含配置草案、时序图、决策表）：[docs/V1_CONVERSATIONAL_PRECHECK_DESIGN.md](docs/V1_CONVERSATIONAL_PRECHECK_DESIGN.md)
+- 对话式前置处理 V1 最小落地实施清单（按文件/测试/提交拆分）：[docs/V1_MINIMAL_IMPLEMENTATION_CHECKLIST.md](docs/V1_MINIMAL_IMPLEMENTATION_CHECKLIST.md)
 - 版本变更记录：[CHANGELOG.md](CHANGELOG.md)

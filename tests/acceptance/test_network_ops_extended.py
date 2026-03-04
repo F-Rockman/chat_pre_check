@@ -141,6 +141,13 @@ EXTENDED_CASES = [
         "expected_type": "route_nl2sql",
         "expected_scene": "alarm.analysis",
     },
+    # report route
+    {
+        "id": "NP01",
+        "text": "帮我生成巡检报告",
+        "expected_type": "route_report",
+        "expected_scene": "report.inspect",
+    },
     # refuse routes
     {
         "id": "NR01",
@@ -183,7 +190,7 @@ def test_network_ops_extended_cases(test_engine, case):
 
 
 def test_extended_case_distribution():
-    expected = {"route_template": 8, "clarify": 6, "route_nl2sql": 8, "refuse": 3}
+    expected = {"route_template": 8, "clarify": 6, "route_nl2sql": 8, "route_report": 1, "refuse": 3}
     actual = {}
     for case in EXTENDED_CASES:
         actual[case["expected_type"]] = actual.get(case["expected_type"], 0) + 1

@@ -40,6 +40,15 @@
 - API route now executes sync engine logic via FastAPI threadpool (`run_in_threadpool`) to avoid event-loop blocking.
 - Reordered middleware so `seed_scope_guard` is enforced only before NL2SQL fallback (after template matching).
 - Added retriever query-vector LRU cache to reuse embeddings across scene/template/seed retrieval in same query text path.
+- Added V1 flow routing layer (`query/report/direct/unknown`) in pipeline and wired report path routing (`route_report`).
+- Added context-driven clarify round controls (`clarify_round`, `max_clarify_round`, `pending_slots`) with refuse-on-exceed fallback.
+- Added optional single-call LLM assist path for flow disambiguation with timeout fallback and env-based credential injection.
+- Hardened LLM assist fallback behavior:
+  - FlowRouter now catches LLM exceptions and always degrades to rule-only path (no engine-level data_unavailable fallback).
+  - LLM client now defaults to `enable_thinking=false` and JSON response mode to reduce latency/format drift.
+  - Raised default LLM timeout from 700ms to 2500ms for better real-endpoint success rate.
+  - Added flow-type normalization for non-standard LLM labels (e.g. `report_generation` -> `report`).
+  - Added `flow_router.llm_on_low_confidence` switch (default `false`) to avoid unnecessary LLM calls on low-confidence/noisy inputs.
 
 ### Tests
 - Added API router thread-model unit test to verify `/v1/precheck/route` uses threadpool execution and preserves `RouteRequest` fields.
@@ -53,6 +62,15 @@
   - signature stability with slot-order normalization
   - weighted accuracy / exact accuracy / stability / per-type accuracy aggregation
 - Added AC multi-domain ranking unit test to verify same-score conflict is ordered by `domain_priority`.
+- Added flow/report/clarify-round unit and acceptance coverage:
+  - `tests/unit/test_flow_router.py`
+  - `tests/unit/test_report_flow.py`
+  - `tests/unit/test_clarify_rounds.py`
+  - `tests/unit/test_llm_assist.py`
+- Added LLM robustness test coverage:
+  - FlowRouter rule fallback when LLM call raises exception.
+  - LLM assist flow-type normalization for non-standard labels.
+  - Config validator check for `rules.llm.response_format_json` type.
 
 ### Docs
 - Updated README and guides to reflect unified config model and new import/export paths.
@@ -62,6 +80,12 @@
   - `docs/CAPABILITIES_GUIDE.md` (full field-level design for `capabilities.json`)
   - `docs/DEPLOYMENT_AND_ARCHITECTURE_GUIDE.md` (deployment + backend switch + runtime flow)
 - Removed fragmented legacy guides to reduce maintenance complexity.
+- Added `docs/V1_CONVERSATIONAL_PRECHECK_DESIGN.md` for the next-stage architecture baseline, including:
+  - onion-mode pipeline extension plan
+  - capability/rules incremental config draft
+  - mermaid sequence/flow diagrams
+  - decision table and pseudocode
+- Added `docs/V1_MINIMAL_IMPLEMENTATION_CHECKLIST.md` to split V1 rollout into milestone-based code/test/commit tasks.
 
 ### Code Readability
 - Added Chinese inline comments and docstrings across core modules:

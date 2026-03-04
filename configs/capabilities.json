@@ -54,6 +54,9 @@
   "capabilities": [
     {
       "capability_id": "alarm.query",
+      "flow_type": "query",
+      "router_priority": 92,
+      "entry_phrases": ["查告警", "查询告警", "告警top", "告警数量"],
       "description": "告警查询与 TopN",
       "enabled": true,
       "scope": {
@@ -341,6 +344,9 @@
     },
     {
       "capability_id": "device.query",
+      "flow_type": "query",
+      "router_priority": 90,
+      "entry_phrases": ["查设备", "设备趋势", "设备kpi", "离线设备"],
       "description": "设备状态与离线分析",
       "enabled": true,
       "scope": {
@@ -532,6 +538,9 @@
     },
     {
       "capability_id": "alarm.analysis",
+      "flow_type": "query",
+      "router_priority": 88,
+      "entry_phrases": ["告警分析", "关联率", "同比环比", "丢包率排名"],
       "description": "告警高级统计分析",
       "enabled": true,
       "scope": {
@@ -671,6 +680,9 @@
     },
     {
       "capability_id": "ticket.analysis",
+      "flow_type": "query",
+      "router_priority": 80,
+      "entry_phrases": ["工单分析", "工单关联率"],
       "description": "工单与告警关联分析",
       "enabled": true,
       "scope": {
@@ -701,6 +713,62 @@
         "slots": {}
       },
       "recommendations": [],
+      "intents": []
+    },
+    {
+      "capability_id": "report.inspect",
+      "flow_type": "report",
+      "router_priority": 95,
+      "entry_phrases": ["生成巡检报告", "帮我生成报告", "生成报告", "巡检报告"],
+      "description": "智能巡检报告生成",
+      "enabled": true,
+      "scope": {
+        "keywords": ["报告", "巡检", "生成", "日报", "周报", "月报"],
+        "examples": ["帮我生成巡检报告", "生成今天的网络巡检报告", "生成报告"]
+      },
+      "slots": {
+        "required": ["time_range"],
+        "conditional": [],
+        "defaults": {
+          "time_range": {
+            "mode": "relative",
+            "preset": "today"
+          },
+          "report_scope": "network"
+        },
+        "clarify_policy": {
+          "primary_slots": ["time_range", "report_scope"]
+        }
+      },
+      "slot_policy": {
+        "max_ask_per_turn": 2,
+        "slots": {
+          "time_range": {
+            "priority": 0.95,
+            "ask_cost": 0.1,
+            "defaultable": true
+          },
+          "report_scope": {
+            "priority": 0.9,
+            "ask_cost": 0.2,
+            "defaultable": true
+          }
+        }
+      },
+      "recommendations": [
+        {
+          "label": "生成今天全网巡检报告",
+          "intent": "report.inspect",
+          "preset_slots": {
+            "time_range": {
+              "mode": "relative",
+              "preset": "today"
+            },
+            "report_scope": "network"
+          },
+          "need_followup_slots": []
+        }
+      ],
       "intents": []
     }
   ]

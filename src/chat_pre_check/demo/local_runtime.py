@@ -21,6 +21,7 @@ class LocalHeuristicRetriever:
     SCENE_ALARM_ANALYSIS = "alarm.analysis"
     SCENE_DEVICE_QUERY = "device.query"
     SCENE_TICKET_ANALYSIS = "ticket.analysis"
+    SCENE_REPORT_INSPECT = "report.inspect"
 
     def __init__(
         self,
@@ -59,7 +60,12 @@ class LocalHeuristicRetriever:
         text = query_text.lower()
         candidates: list[tuple[str, float]] = []
 
-        if "近24小时告警" in text and "top" not in text:
+        if any(token in text for token in ("报告", "巡检", "生成报告", "生成巡检报告")):
+            candidates = [
+                (self.SCENE_REPORT_INSPECT, 0.98),
+                (self.SCENE_ALARM_QUERY, 0.55),
+            ]
+        elif "近24小时告警" in text and "top" not in text:
             candidates = [
                 (self.SCENE_ALARM_QUERY, 0.93),
                 (self.SCENE_ALARM_ANALYSIS, 0.88),

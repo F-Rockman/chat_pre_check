@@ -4,9 +4,6 @@
     "写一段",
     "写一篇",
     "写作文",
-    "周报",
-    "日报",
-    "月报",
     "诗",
     "小说",
     "翻译"
@@ -33,5 +30,50 @@
       "roles": ["guest", "viewer"],
       "keywords": ["财务", "利润", "薪资"]
     }
-  ]
+  ],
+  "flow_router": {
+    "enabled": true,
+    "min_confidence": 0.3,
+    "ambiguous_gap": 0.08,
+    "llm_on_low_confidence": false,
+    "allow_direct_pass": true,
+    "direct_pass_intents": ["health.check", "help"]
+  },
+  "llm": {
+    "enabled": false,
+    "base_url": "https://coding.dashscope.aliyuncs.com/v1",
+    "model": "qwen3.5-plus",
+    "timeout_ms": 2500,
+    "max_calls_per_request": 1,
+    "max_input_chars": 350,
+    "max_output_tokens": 120,
+    "enable_thinking": false,
+    "response_format_json": true,
+    "fallback_on_timeout": "rule_only"
+  },
+  "clarify": {
+    "global_max_rounds": 5
+  },
+  "recommendation": {
+    "enable_hot_queries": false,
+    "hot_query_window_days": 7,
+    "topk": 4,
+    "score_mix": {
+      "similarity": 0.6,
+      "hotness": 0.4
+    }
+  },
+  "context": {
+    "keys_whitelist": [
+      "session_id",
+      "flow_type",
+      "scene",
+      "slots",
+      "pending_slots",
+      "clarify_round",
+      "last_decision_type",
+      "route_override"
+    ],
+    "ttl_minutes": 60
+  }
 }

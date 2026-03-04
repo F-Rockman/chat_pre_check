@@ -4,7 +4,7 @@ import time
 
 from chat_pre_check.application.services.recommendation import RecommendationService
 from chat_pre_check.application.services.slot_policy import SlotPolicyEngine
-from chat_pre_check.domain.enums import DecisionType
+from chat_pre_check.domain.enums import DecisionType, OutOfScopeReason
 from chat_pre_check.domain.interfaces import SceneRepository
 from chat_pre_check.domain.models import RequestContext, RouteDecision, TraceStep
 
@@ -19,10 +19,12 @@ class SlotClarifierMiddleware:
         scene_repository: SceneRepository,
         recommendation_service: RecommendationService,
         slot_policy_engine: SlotPolicyEngine,
+        max_rounds: int = 5,
     ) -> None:
         self.scene_repository = scene_repository
         self.recommendation_service = recommendation_service
         self.slot_policy_engine = slot_policy_engine
+        self.max_rounds = max(1, int(max_rounds))
 
     def process(self, ctx: RequestContext) -> RouteDecision | None:
         started = time.perf_counter()
@@ -69,6 +71,39 @@ class SlotClarifierMiddleware:
                 entities=ctx.entities,
             )
             primary = ask_slots[0]
+            max_rounds = max(1, int(ctx.max_clarify_round or self.max_rounds))
+            if ctx.clarify_round >= max_rounds:
+                elapsed = (time.perf_counter() - started) * 1000
+                ctx.trace.add_step(
+                    TraceStep(
+                        step=self.name,
+                        decision="refuse",
+                        reason="clarify_round_exceeded",
+                        latency_ms=elapsed,
+                        extra={
+                            "clarify_round": ctx.clarify_round,
+                            "max_rounds": max_rounds,
+                            "missing_slots": missing,
+                        },
+                    )
+                )
+                return RouteDecision(
+                    type=DecisionType.REFUSE,
+                    message="已达到最大追问轮次，请补充完整条件后重试。",
+                    flow_type=ctx.flow_type,
+                    scene=ctx.scene,
+                    slots=dict(ctx.slots),
+                    options=self.recommendation_service.refuse_options(
+                        ctx, OutOfScopeReason.UNSUPPORTED_DOMAIN
+                    ),
+                    out_of_scope_reason=OutOfScopeReason.UNSUPPORTED_DOMAIN,
+                    clarify_round=ctx.clarify_round,
+                    max_clarify_round=max_rounds,
+                    next_action="refuse",
+                )
+
+            ctx.clarify_round += 1
+            ctx.pending_slots = list(ask_slots)
             elapsed = (time.perf_counter() - started) * 1000
             ctx.trace.add_step(
                 TraceStep(
@@ -86,16 +121,22 @@ class SlotClarifierMiddleware:
                             }
                             for item in ranked
                         ],
+                        "clarify_round": ctx.clarify_round,
+                        "max_rounds": max_rounds,
                     },
                 )
             )
             return RouteDecision(
                 type=DecisionType.CLARIFY,
                 message=f"继续前需要先确认：{primary}。",
+                flow_type=ctx.flow_type,
                 scene=ctx.scene,
                 slots=dict(ctx.slots),
                 missing_slots=ask_slots,
                 options=self.recommendation_service.slot_clarify_options(primary, ctx),
+                clarify_round=ctx.clarify_round,
+                max_clarify_round=max_rounds,
+                next_action="ask_slot",
             )
 
         elapsed = (time.perf_counter() - started) * 1000

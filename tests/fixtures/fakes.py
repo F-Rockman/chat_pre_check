@@ -54,7 +54,12 @@ class FakeVectorRetriever:
     def search_scene(self, query_text: str, topk: int = 5) -> list[SearchHit]:
         text = query_text.lower()
         hits: list[SearchHit] = []
-        if "近24小时告警" in text and "top" not in text:
+        if any(k in text for k in ["报告", "巡检", "生成报告", "生成巡检报告"]):
+            hits = [
+                SearchHit("scene_report_inspect", 0.98, {"scene_id": "report.inspect"}),
+                SearchHit("scene_alarm_query", 0.55, {"scene_id": "alarm.query"}),
+            ]
+        elif "近24小时告警" in text and "top" not in text:
             hits = [
                 SearchHit("scene_alarm_query", 0.93, {"scene_id": "alarm.query"}),
                 SearchHit("scene_alarm_analysis", 0.88, {"scene_id": "alarm.analysis"}),

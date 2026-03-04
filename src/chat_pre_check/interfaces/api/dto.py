@@ -31,9 +31,13 @@ class RouteResponseDTO(BaseModel):
     type: str
     message: str
     scene: str | None = None
+    flow_type: str | None = None
     template_id: str | None = None
     slots: dict[str, Any] = Field(default_factory=dict)
     missing_slots: list[str] = Field(default_factory=list)
     options: list[ActionOptionDTO] = Field(default_factory=list)
     out_of_scope_reason: str | None = None
+    clarify_round: int | None = None
+    max_clarify_round: int | None = None
+    next_action: str | None = None
     trace: dict[str, Any] = Field(default_factory=dict)

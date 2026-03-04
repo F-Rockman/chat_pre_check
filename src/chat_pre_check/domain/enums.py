@@ -8,6 +8,7 @@ class DecisionType(str, Enum):
     CLARIFY = "clarify"
     ROUTE_TEMPLATE = "route_template"
     ROUTE_NL2SQL = "route_nl2sql"
+    ROUTE_REPORT = "route_report"
 
 
 class OutOfScopeReason(str, Enum):

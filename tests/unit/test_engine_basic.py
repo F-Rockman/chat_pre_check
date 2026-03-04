@@ -9,5 +9,6 @@ def test_engine_returns_decision(test_engine):
         DecisionType.CLARIFY,
         DecisionType.ROUTE_TEMPLATE,
         DecisionType.ROUTE_NL2SQL,
+        DecisionType.ROUTE_REPORT,
     }
     assert "request_id" in decision.trace

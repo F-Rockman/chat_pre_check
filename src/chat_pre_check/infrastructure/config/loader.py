@@ -98,6 +98,9 @@ def _compile_capabilities(
             {
                 "scene_id": capability_id,
                 "description": str(cap.get("description", "")).strip(),
+                "flow_type": str(cap.get("flow_type", "query")).strip().lower() or "query",
+                "router_priority": _to_int(cap.get("router_priority"), 50),
+                "entry_phrases": _to_str_list(cap.get("entry_phrases")),
                 "required_slots": _to_str_list(slots.get("required")),
                 "conditional_slots": _to_list_of_dict(slots.get("conditional")),
                 "defaults": _to_dict(slots.get("defaults")),

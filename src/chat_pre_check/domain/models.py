@@ -84,9 +84,16 @@ class RequestContext:
     tenant_id: str | None = None
     role: str | None = None
     context_scene: str | None = None
+    context_flow_type: str | None = None
+    route_override: str | None = None
     slots: dict[str, Any] = field(default_factory=dict)
     entities: dict[str, Any] = field(default_factory=dict)
     scene: str | None = None
+    flow_type: str | None = None
+    clarify_round: int = 0
+    max_clarify_round: int = 5
+    pending_slots: list[str] = field(default_factory=list)
+    llm_calls: int = 0
     trace_level: str = "compact"
     trace: TraceCollector = field(default_factory=TraceCollector)
 
@@ -96,11 +103,15 @@ class RouteDecision:
     type: DecisionType
     message: str
     scene: str | None = None
+    flow_type: str | None = None
     template_id: str | None = None
     slots: dict[str, Any] = field(default_factory=dict)
     missing_slots: list[str] = field(default_factory=list)
     options: list[ActionOption] = field(default_factory=list)
     out_of_scope_reason: OutOfScopeReason | None = None
+    clarify_round: int | None = None
+    max_clarify_round: int | None = None
+    next_action: str | None = None
     trace: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -108,6 +119,7 @@ class RouteDecision:
             "type": self.type.value,
             "message": self.message,
             "scene": self.scene,
+            "flow_type": self.flow_type,
             "template_id": self.template_id,
             "slots": self.slots,
             "missing_slots": self.missing_slots,
@@ -124,5 +136,8 @@ class RouteDecision:
             "out_of_scope_reason": (
                 self.out_of_scope_reason.value if self.out_of_scope_reason else None
             ),
+            "clarify_round": self.clarify_round,
+            "max_clarify_round": self.max_clarify_round,
+            "next_action": self.next_action,
             "trace": self.trace,
         }

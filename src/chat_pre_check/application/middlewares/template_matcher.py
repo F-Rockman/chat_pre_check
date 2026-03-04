@@ -37,6 +37,18 @@ class TemplateMatcherMiddleware:
 
     def process(self, ctx: RequestContext) -> RouteDecision | None:
         started = time.perf_counter()
+        if ctx.flow_type == "report":
+            elapsed = (time.perf_counter() - started) * 1000
+            ctx.trace.add_step(
+                TraceStep(
+                    step=self.name,
+                    decision="continue",
+                    reason="report_flow_skip",
+                    latency_ms=elapsed,
+                )
+            )
+            return None
+
         if not ctx.scene:
             elapsed = (time.perf_counter() - started) * 1000
             ctx.trace.add_step(
@@ -82,12 +94,16 @@ class TemplateMatcherMiddleware:
             return RouteDecision(
                 type=DecisionType.REFUSE,
                 message="模板召回依赖暂时不可用，请稍后重试。",
+                flow_type=ctx.flow_type,
                 scene=ctx.scene,
                 slots=dict(ctx.slots),
                 options=self.recommendation_service.refuse_options(
                     ctx, OutOfScopeReason.DATA_UNAVAILABLE
                 ),
                 out_of_scope_reason=OutOfScopeReason.DATA_UNAVAILABLE,
+                clarify_round=ctx.clarify_round,
+                max_clarify_round=ctx.max_clarify_round,
+                next_action="refuse",
             )
         vector_map = self._vector_map(vector_hits, key="template_id")
 
@@ -150,12 +166,16 @@ class TemplateMatcherMiddleware:
             return RouteDecision(
                 type=DecisionType.CLARIFY,
                 message="模板已命中，但仍缺少必要参数。",
+                flow_type=ctx.flow_type,
                 scene=ctx.scene,
                 slots=dict(ctx.slots),
                 missing_slots=missing_slots[:2],
                 options=self.recommendation_service.slot_clarify_options(
                     missing_slots[0], ctx
                 ),
+                clarify_round=ctx.clarify_round,
+                max_clarify_round=ctx.max_clarify_round,
+                next_action="ask_slot",
             )
 
         elapsed = (time.perf_counter() - started) * 1000
@@ -173,11 +193,15 @@ class TemplateMatcherMiddleware:
         return RouteDecision(
             type=DecisionType.ROUTE_TEMPLATE,
             message="已命中可执行模板。",
+            flow_type=ctx.flow_type,
             scene=ctx.scene,
             template_id=top_template_id,
             slots=dict(ctx.slots),
             missing_slots=[],
             options=[],
+            clarify_round=ctx.clarify_round,
+            max_clarify_round=ctx.max_clarify_round,
+            next_action="route_template",
         )
 
     @staticmethod

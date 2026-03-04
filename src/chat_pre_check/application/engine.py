@@ -27,12 +27,31 @@ class PrecheckEngine:
 
     def route(self, request: RouteRequest) -> RouteDecision:
         # 将外部请求字段投影到内部上下文，统一后续链路读取方式。
+        context = request.context or {}
+        clarify_round = context.get("clarify_round", 0)
+        max_clarify_round = context.get("max_clarify_round", 5)
+        try:
+            clarify_round = max(0, int(clarify_round))
+        except (TypeError, ValueError):
+            clarify_round = 0
+        try:
+            max_clarify_round = max(1, int(max_clarify_round))
+        except (TypeError, ValueError):
+            max_clarify_round = 5
+
         ctx = RequestContext(
             input_text=request.input_text,
             tenant_id=request.tenant_id,
             role=request.role,
-            context_scene=(request.context or {}).get("scene"),
-            slots=dict((request.context or {}).get("slots", {})),
+            context_scene=context.get("scene"),
+            context_flow_type=context.get("flow_type"),
+            route_override=context.get("route_override"),
+            slots=dict(context.get("slots", {})),
+            pending_slots=list(context.get("pending_slots", []))
+            if isinstance(context.get("pending_slots"), list)
+            else [],
+            clarify_round=clarify_round,
+            max_clarify_round=max_clarify_round,
             trace_level=request.trace_level,
         )
         started = time.perf_counter()
@@ -53,14 +72,24 @@ class PrecheckEngine:
             decision = RouteDecision(
                 type=DecisionType.REFUSE,
                 message="系统繁忙或依赖暂时不可用，请稍后重试。",
+                flow_type=ctx.flow_type or ctx.context_flow_type,
                 slots=dict(ctx.slots),
                 options=list(self.fallback_options),
                 out_of_scope_reason=OutOfScopeReason.DATA_UNAVAILABLE,
+                clarify_round=ctx.clarify_round,
+                max_clarify_round=ctx.max_clarify_round,
+                next_action="refuse",
             )
         decision.trace = render_trace(ctx.trace, level=request.trace_level)
         # 补全兜底字段，确保响应结构稳定。
         if not decision.scene:
             decision.scene = ctx.scene
+        if not decision.flow_type:
+            decision.flow_type = ctx.flow_type or ctx.context_flow_type
         if not decision.slots:
             decision.slots = dict(ctx.slots)
+        if decision.clarify_round is None:
+            decision.clarify_round = ctx.clarify_round
+        if decision.max_clarify_round is None:
+            decision.max_clarify_round = ctx.max_clarify_round
         return decision

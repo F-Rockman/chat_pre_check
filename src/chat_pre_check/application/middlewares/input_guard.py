@@ -42,11 +42,15 @@ class InputGuardMiddleware:
             return RouteDecision(
                 type=DecisionType.CLARIFY,
                 message="我没收到有效问题，请用一句话描述你要查询的网络运维问题。",
+                flow_type=ctx.flow_type or ctx.context_flow_type,
                 slots=dict(ctx.slots),
                 missing_slots=["input_text"],
                 options=self.recommendation_service.refuse_options(
                     ctx, OutOfScopeReason.UNKNOWN_DOMAIN
                 ),
+                clarify_round=ctx.clarify_round,
+                max_clarify_round=ctx.max_clarify_round,
+                next_action="ask_slot",
             )
 
         # 超长输入直接拒答，降低误召回和异常解析成本。
@@ -64,11 +68,15 @@ class InputGuardMiddleware:
             return RouteDecision(
                 type=DecisionType.REFUSE,
                 message=f"输入过长（>{self.max_input_chars} 字），请拆分为更具体的查询。",
+                flow_type=ctx.flow_type or ctx.context_flow_type,
                 slots=dict(ctx.slots),
                 options=self.recommendation_service.refuse_options(
                     ctx, OutOfScopeReason.UNSUPPORTED_DOMAIN
                 ),
                 out_of_scope_reason=OutOfScopeReason.UNSUPPORTED_DOMAIN,
+                clarify_round=ctx.clarify_round,
+                max_clarify_round=ctx.max_clarify_round,
+                next_action="refuse",
             )
 
         elapsed = (time.perf_counter() - started) * 1000

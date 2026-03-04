@@ -11,6 +11,7 @@ def test_loader_compiles_capabilities_to_runtime_config() -> None:
     assert len(config.seed_cases) >= 1
     assert "default" in config.slot_policies
     assert "scenes" in config.slot_policies
+    assert any(scene.get("flow_type") == "query" for scene in config.scenes)
 
 
 def test_compiled_template_has_scene_id() -> None:
@@ -25,6 +26,7 @@ def test_compile_intents_into_template_and_seed_views() -> None:
         {
             "capability_id": "device.query",
             "description": "device query",
+            "flow_type": "query",
             "scope": {"keywords": ["设备"], "examples": ["查设备"]},
             "slots": {"required": ["time_range"], "conditional": [], "defaults": {}},
             "intents": [
@@ -58,3 +60,27 @@ def test_compile_intents_into_template_and_seed_views() -> None:
     assert len(seed_cases) == 1
     assert seed_cases[0]["case_id"] == "seed_device_trend"
     assert seed_cases[0]["template_id"] == "tpl_alarm_trend_device"
+
+
+def test_compile_scene_keeps_flow_metadata() -> None:
+    capabilities = [
+        {
+            "capability_id": "report.inspect",
+            "description": "report",
+            "flow_type": "report",
+            "router_priority": 99,
+            "entry_phrases": ["生成巡检报告"],
+            "scope": {"keywords": ["报告"], "examples": ["生成报告"]},
+            "slots": {"required": ["time_range"], "conditional": [], "defaults": {}},
+            "intents": [],
+        }
+    ]
+    scenes, _templates, _cases, _seed_cases, _slot_policies = _compile_capabilities(
+        capabilities=capabilities,
+        slot_policy_defaults={},
+    )
+    assert len(scenes) == 1
+    assert scenes[0]["scene_id"] == "report.inspect"
+    assert scenes[0]["flow_type"] == "report"
+    assert scenes[0]["router_priority"] == 99
+    assert scenes[0]["entry_phrases"] == ["生成巡检报告"]

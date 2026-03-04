@@ -7,17 +7,20 @@ from zoneinfo import ZoneInfo
 from chat_pre_check.application.engine import PrecheckEngine
 from chat_pre_check.application.middlewares.entity_enricher import EntityEnricherMiddleware
 from chat_pre_check.application.middlewares.entity_extractor import EntityExtractorMiddleware
+from chat_pre_check.application.middlewares.flow_router import FlowRouterMiddleware
 from chat_pre_check.application.middlewares.input_guard import InputGuardMiddleware
 from chat_pre_check.application.middlewares.nl2sql_router import NL2SQLRouterMiddleware
 from chat_pre_check.application.middlewares.normalize import NormalizeMiddleware
 from chat_pre_check.application.middlewares.param_prefill import ParamPrefillMiddleware
 from chat_pre_check.application.middlewares.policy_guard import PolicyGuardMiddleware
+from chat_pre_check.application.middlewares.report_router import ReportRouterMiddleware
 from chat_pre_check.application.middlewares.scene_router import SceneRouterMiddleware
 from chat_pre_check.application.middlewares.seed_scope_guard import SeedScopeGuardMiddleware
 from chat_pre_check.application.middlewares.scope_gate import ScopeGateMiddleware
 from chat_pre_check.application.middlewares.slot_clarifier import SlotClarifierMiddleware
 from chat_pre_check.application.middlewares.template_matcher import TemplateMatcherMiddleware
 from chat_pre_check.application.pipeline import MiddlewarePipeline
+from chat_pre_check.application.services.llm_assist import FlowLLMAssistService
 from chat_pre_check.application.services.recommendation import RecommendationService
 from chat_pre_check.application.services.slot_policy import SlotPolicyEngine
 from chat_pre_check.domain.enums import OutOfScopeReason
@@ -25,6 +28,7 @@ from chat_pre_check.domain.models import RequestContext, SearchHit
 from chat_pre_check.infrastructure.config.loader import load_app_config
 from chat_pre_check.infrastructure.embedding.e5_embedder import E5Embedder
 from chat_pre_check.infrastructure.extractors.ac_prefill import build_slot_prefiller
+from chat_pre_check.infrastructure.llm.client import OpenAICompatibleChatClient
 from chat_pre_check.infrastructure.repositories.inmemory_repos import (
     InMemoryCaseRepository,
     InMemorySceneRepository,
@@ -99,6 +103,39 @@ def build_engine(
     slot_prefiller = build_slot_prefiller(config_dir=config_dir, prefill_cfg=prefill_cfg)
     default_timezone = vector_cfg.get("default_timezone", _local_timezone())
     slot_policy_engine = SlotPolicyEngine(config.slot_policies)
+    llm_cfg = config.rules.get("llm", {})
+    llm_client = None
+    if isinstance(llm_cfg, dict) and bool(llm_cfg.get("enabled", False)):
+        llm_api_key = os.getenv("CHAT_PRE_CHECK_LLM_API_KEY", "").strip()
+        if llm_api_key:
+            llm_client = OpenAICompatibleChatClient(
+                base_url=str(
+                    llm_cfg.get(
+                        "base_url",
+                        os.getenv("CHAT_PRE_CHECK_LLM_BASE_URL", "https://coding.dashscope.aliyuncs.com/v1"),
+                    )
+                ),
+                api_key=llm_api_key,
+                model=str(
+                    llm_cfg.get(
+                        "model",
+                        os.getenv("CHAT_PRE_CHECK_LLM_MODEL", "qwen3.5-plus"),
+                    )
+                ),
+                timeout_ms=int(llm_cfg.get("timeout_ms", 2500)),
+                enable_thinking=bool(llm_cfg.get("enable_thinking", False)),
+                force_json_response=bool(llm_cfg.get("response_format_json", True)),
+            )
+    llm_assist = FlowLLMAssistService(
+        client=llm_client,
+        enabled=bool(isinstance(llm_cfg, dict) and llm_cfg.get("enabled", False)),
+        max_input_chars=int(llm_cfg.get("max_input_chars", 350))
+        if isinstance(llm_cfg, dict)
+        else 350,
+        max_output_tokens=int(llm_cfg.get("max_output_tokens", 120))
+        if isinstance(llm_cfg, dict)
+        else 120,
+    )
 
     retriever = retriever_override
     device_resolver = device_resolver_override
@@ -146,8 +183,8 @@ def build_engine(
             region_resolver = region_resolver or NoopResolver()
 
     # Pipeline 顺序约束：
-    # 1) 先做文本标准化、输入校验、实体提取/预填；
-    # 2) 再做策略/范围判定与场景路由；
+    # 1) 先做文本标准化、输入校验、安全与分流；
+    # 2) 再做实体提取/预填与范围判定；
     # 3) 模板优先，只有模板未命中时才进入 SeedScopeGuard + NL2SQL 兜底。
     pipeline = MiddlewarePipeline(
         [
@@ -156,6 +193,16 @@ def build_engine(
                 recommendation_service=recommendation_service,
                 max_input_chars=int(config.rules.get("max_input_chars", 1000)),
                 min_input_chars=int(config.rules.get("min_input_chars", 1)),
+            ),
+            PolicyGuardMiddleware(
+                rules=config.rules,
+                recommendation_service=recommendation_service,
+            ),
+            FlowRouterMiddleware(
+                scene_repository=scene_repo,
+                recommendation_service=recommendation_service,
+                router_config=config.rules.get("flow_router", {}),
+                llm_assist=llm_assist,
             ),
             EntityExtractorMiddleware(default_timezone=default_timezone),
             ParamPrefillMiddleware(
@@ -184,10 +231,6 @@ def build_engine(
                     prefill_cfg.get("skip_remote_resolver_when_prefilled", True)
                 ),
             ),
-            PolicyGuardMiddleware(
-                rules=config.rules,
-                recommendation_service=recommendation_service,
-            ),
             ScopeGateMiddleware(
                 scene_repository=scene_repo,
                 retriever=retriever,
@@ -201,7 +244,11 @@ def build_engine(
                 scene_repository=scene_repo,
                 recommendation_service=recommendation_service,
                 slot_policy_engine=slot_policy_engine,
+                max_rounds=int(config.rules.get("clarify", {}).get("global_max_rounds", 5))
+                if isinstance(config.rules.get("clarify"), dict)
+                else 5,
             ),
+            ReportRouterMiddleware(),
             TemplateMatcherMiddleware(
                 template_repository=template_repo,
                 retriever=retriever,

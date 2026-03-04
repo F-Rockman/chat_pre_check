@@ -38,6 +38,19 @@ class ScopeGateMiddleware:
 
     def process(self, ctx: RequestContext) -> RouteDecision | None:
         started = time.perf_counter()
+        if ctx.scene and self.scene_repository.get(ctx.scene):
+            elapsed = (time.perf_counter() - started) * 1000
+            ctx.trace.add_step(
+                TraceStep(
+                    step=self.name,
+                    decision="continue",
+                    reason="scene_preselected",
+                    latency_ms=elapsed,
+                    extra={"scene": ctx.scene},
+                )
+            )
+            return None
+
         if ctx.context_scene and self.scene_repository.get(ctx.context_scene):
             # 上下文显式指定且存在的场景优先。
             ctx.scene = ctx.context_scene
@@ -54,6 +67,36 @@ class ScopeGateMiddleware:
             return None
 
         scenes = self.scene_repository.all_enabled()
+        if ctx.flow_type:
+            scenes = [
+                item
+                for item in scenes
+                if str(item.get("flow_type", "query")).strip().lower() == ctx.flow_type
+            ]
+            if not scenes:
+                elapsed = (time.perf_counter() - started) * 1000
+                ctx.trace.add_step(
+                    TraceStep(
+                        step=self.name,
+                        decision="refuse",
+                        reason="flow_without_scene",
+                        latency_ms=elapsed,
+                        extra={"flow_type": ctx.flow_type},
+                    )
+                )
+                return RouteDecision(
+                    type=DecisionType.REFUSE,
+                    message="当前业务流暂未接入可执行场景。",
+                    flow_type=ctx.flow_type,
+                    slots=dict(ctx.slots),
+                    options=self.recommendation_service.refuse_options(
+                        ctx, OutOfScopeReason.UNSUPPORTED_DOMAIN
+                    ),
+                    out_of_scope_reason=OutOfScopeReason.UNSUPPORTED_DOMAIN,
+                    clarify_round=ctx.clarify_round,
+                    max_clarify_round=ctx.max_clarify_round,
+                    next_action="refuse",
+                )
         try:
             vector_hits = self.retriever.search_scene(ctx.norm_text, topk=self.scene_topk)
         except Exception as exc:
@@ -70,11 +113,15 @@ class ScopeGateMiddleware:
             return RouteDecision(
                 type=DecisionType.REFUSE,
                 message="场景识别依赖暂时不可用，请稍后重试。",
+                flow_type=ctx.flow_type,
                 slots=dict(ctx.slots),
                 options=self.recommendation_service.refuse_options(
                     ctx, OutOfScopeReason.DATA_UNAVAILABLE
                 ),
                 out_of_scope_reason=OutOfScopeReason.DATA_UNAVAILABLE,
+                clarify_round=ctx.clarify_round,
+                max_clarify_round=ctx.max_clarify_round,
+                next_action="refuse",
             )
         vector_map = self._vector_map(vector_hits, key="scene_id")
 
@@ -120,11 +167,15 @@ class ScopeGateMiddleware:
             return RouteDecision(
                 type=DecisionType.REFUSE,
                 message="当前问题不在已支持的数据分析范围内。",
+                flow_type=ctx.flow_type,
                 slots=dict(ctx.slots),
                 options=self.recommendation_service.refuse_options(
                     ctx, OutOfScopeReason.UNSUPPORTED_DOMAIN
                 ),
                 out_of_scope_reason=OutOfScopeReason.UNSUPPORTED_DOMAIN,
+                clarify_round=ctx.clarify_round,
+                max_clarify_round=ctx.max_clarify_round,
+                next_action="refuse",
             )
 
         if (top1_score - top2_score) < self.thresholds["T_scene_gap"]:
@@ -144,9 +195,13 @@ class ScopeGateMiddleware:
             return RouteDecision(
                 type=DecisionType.CLARIFY,
                 message="我可以继续，但需要先确认你要查询的场景。",
+                flow_type=ctx.flow_type,
                 slots=dict(ctx.slots),
                 missing_slots=["scene"],
                 options=self.recommendation_service.scene_clarify_options(top_candidates),
+                clarify_round=ctx.clarify_round,
+                max_clarify_round=ctx.max_clarify_round,
+                next_action="ask_slot",
             )
 
         elapsed = (time.perf_counter() - started) * 1000

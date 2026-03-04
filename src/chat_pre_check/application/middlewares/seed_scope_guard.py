@@ -26,6 +26,18 @@ class SeedScopeGuardMiddleware:
 
     def process(self, ctx: RequestContext) -> RouteDecision | None:
         started = time.perf_counter()
+        if ctx.flow_type and ctx.flow_type != "query":
+            elapsed = (time.perf_counter() - started) * 1000
+            ctx.trace.add_step(
+                TraceStep(
+                    step=self.name,
+                    decision="continue",
+                    reason="non_query_flow_skip",
+                    latency_ms=elapsed,
+                )
+            )
+            return None
+
         if not self.guard_config.get("enabled", False):
             elapsed = (time.perf_counter() - started) * 1000
             ctx.trace.add_step(
@@ -56,12 +68,16 @@ class SeedScopeGuardMiddleware:
             return RouteDecision(
                 type=DecisionType.REFUSE,
                 message="能力边界检查依赖不可用，请稍后重试。",
+                flow_type=ctx.flow_type,
                 scene=ctx.scene,
                 slots=dict(ctx.slots),
                 options=self.recommendation_service.refuse_options(
                     ctx, OutOfScopeReason.DATA_UNAVAILABLE
                 ),
                 out_of_scope_reason=OutOfScopeReason.DATA_UNAVAILABLE,
+                clarify_round=ctx.clarify_round,
+                max_clarify_round=ctx.max_clarify_round,
+                next_action="refuse",
             )
 
         score = seed_hits[0].score if seed_hits else 0.0
@@ -88,10 +104,14 @@ class SeedScopeGuardMiddleware:
             return RouteDecision(
                 type=DecisionType.REFUSE,
                 message="当前场景尚未开放 NL2SQL 能力，请选择已支持的查询入口。",
+                flow_type=ctx.flow_type,
                 scene=ctx.scene,
                 slots=dict(ctx.slots),
                 options=self.recommendation_service.scoped_refuse_options(ctx, seed_hits),
                 out_of_scope_reason=OutOfScopeReason.OUT_OF_SEED_SCOPE,
+                clarify_round=ctx.clarify_round,
+                max_clarify_round=ctx.max_clarify_round,
+                next_action="refuse",
             )
 
         if len(seed_hits) < min_hits or score < min_score:
@@ -117,10 +137,14 @@ class SeedScopeGuardMiddleware:
             return RouteDecision(
                 type=DecisionType.REFUSE,
                 message="该问题暂超出当前可支持的 NL2SQL 能力范围。",
+                flow_type=ctx.flow_type,
                 scene=ctx.scene,
                 slots=dict(ctx.slots),
                 options=self.recommendation_service.scoped_refuse_options(ctx, seed_hits),
                 out_of_scope_reason=OutOfScopeReason.OUT_OF_SEED_SCOPE,
+                clarify_round=ctx.clarify_round,
+                max_clarify_round=ctx.max_clarify_round,
+                next_action="refuse",
             )
 
         elapsed = (time.perf_counter() - started) * 1000

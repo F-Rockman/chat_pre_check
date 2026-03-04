@@ -76,6 +76,23 @@ def _validate_capabilities(capabilities: list[dict[str, Any]]) -> None:
             raise ValueError(f"Capability slots.defaults must be object: {capability_id}")
         if "clarify_policy" in slots and not isinstance(slots["clarify_policy"], dict):
             raise ValueError(f"Capability slots.clarify_policy must be object: {capability_id}")
+        if "flow_type" in cap:
+            flow_type = str(cap.get("flow_type", "")).strip().lower()
+            if flow_type and flow_type not in {"query", "report", "direct", "unknown"}:
+                raise ValueError(f"Capability flow_type invalid: {capability_id}.{flow_type}")
+        if "router_priority" in cap:
+            try:
+                int(cap["router_priority"])
+            except (TypeError, ValueError):
+                raise ValueError(f"Capability router_priority must be int: {capability_id}")
+        if "entry_phrases" in cap and not isinstance(cap["entry_phrases"], list):
+            raise ValueError(f"Capability entry_phrases must be list: {capability_id}")
+        if "clarify" in cap and not isinstance(cap["clarify"], dict):
+            raise ValueError(f"Capability clarify must be object: {capability_id}")
+        if "llm_assist" in cap and not isinstance(cap["llm_assist"], dict):
+            raise ValueError(f"Capability llm_assist must be object: {capability_id}")
+        if "execution" in cap and not isinstance(cap["execution"], dict):
+            raise ValueError(f"Capability execution must be object: {capability_id}")
 
         templates = cap.get("templates", [])
         if templates is not None and not isinstance(templates, list):
@@ -384,6 +401,53 @@ def _validate_rules(rules: dict[str, Any]) -> None:
         raise ValueError("rules.max_input_chars must be positive")
     if "min_input_chars" in rules and int(rules["min_input_chars"]) < 0:
         raise ValueError("rules.min_input_chars must be >= 0")
+
+    flow_router = rules.get("flow_router")
+    if flow_router is not None:
+        if not isinstance(flow_router, dict):
+            raise ValueError("rules.flow_router must be object")
+        if "enabled" in flow_router and not isinstance(flow_router["enabled"], bool):
+            raise ValueError("rules.flow_router.enabled must be bool")
+        if "min_confidence" in flow_router and not (0 <= float(flow_router["min_confidence"]) <= 1):
+            raise ValueError("rules.flow_router.min_confidence must be in [0,1]")
+        if "ambiguous_gap" in flow_router and not (0 <= float(flow_router["ambiguous_gap"]) <= 1):
+            raise ValueError("rules.flow_router.ambiguous_gap must be in [0,1]")
+        if "llm_on_low_confidence" in flow_router and not isinstance(
+            flow_router["llm_on_low_confidence"], bool
+        ):
+            raise ValueError("rules.flow_router.llm_on_low_confidence must be bool")
+        if "allow_direct_pass" in flow_router and not isinstance(flow_router["allow_direct_pass"], bool):
+            raise ValueError("rules.flow_router.allow_direct_pass must be bool")
+        if "direct_pass_intents" in flow_router and not isinstance(
+            flow_router["direct_pass_intents"], list
+        ):
+            raise ValueError("rules.flow_router.direct_pass_intents must be list")
+
+    llm = rules.get("llm")
+    if llm is not None:
+        if not isinstance(llm, dict):
+            raise ValueError("rules.llm must be object")
+        if "enabled" in llm and not isinstance(llm["enabled"], bool):
+            raise ValueError("rules.llm.enabled must be bool")
+        if "max_calls_per_request" in llm and int(llm["max_calls_per_request"]) < 1:
+            raise ValueError("rules.llm.max_calls_per_request must be >=1")
+        if "timeout_ms" in llm and int(llm["timeout_ms"]) < 100:
+            raise ValueError("rules.llm.timeout_ms must be >=100")
+        if "max_input_chars" in llm and int(llm["max_input_chars"]) < 20:
+            raise ValueError("rules.llm.max_input_chars must be >=20")
+        if "max_output_tokens" in llm and int(llm["max_output_tokens"]) < 16:
+            raise ValueError("rules.llm.max_output_tokens must be >=16")
+        if "enable_thinking" in llm and not isinstance(llm["enable_thinking"], bool):
+            raise ValueError("rules.llm.enable_thinking must be bool")
+        if "response_format_json" in llm and not isinstance(llm["response_format_json"], bool):
+            raise ValueError("rules.llm.response_format_json must be bool")
+
+    clarify = rules.get("clarify")
+    if clarify is not None:
+        if not isinstance(clarify, dict):
+            raise ValueError("rules.clarify must be object")
+        if "global_max_rounds" in clarify and int(clarify["global_max_rounds"]) < 1:
+            raise ValueError("rules.clarify.global_max_rounds must be >=1")
 
 
 def _validate_slot_policies(slot_policies: dict[str, Any]) -> None:

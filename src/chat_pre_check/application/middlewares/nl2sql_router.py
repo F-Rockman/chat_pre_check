@@ -25,8 +25,12 @@ class NL2SQLRouterMiddleware:
         return RouteDecision(
             type=DecisionType.ROUTE_NL2SQL,
             message="未命中模板，已路由至 NL2SQL 流程。",
+            flow_type=ctx.flow_type,
             scene=ctx.scene,
             slots=dict(ctx.slots),
             missing_slots=[],
             options=[],
+            clarify_round=ctx.clarify_round,
+            max_clarify_round=ctx.max_clarify_round,
+            next_action="route_nl2sql",
         )
