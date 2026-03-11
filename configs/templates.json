@@ -1,0 +1,145 @@
+{
+  "match_threshold": 0.55,
+  "weights": {
+    "rule": 0.7,
+    "slot_fit": 0.3
+  },
+  "templates": [
+    {
+      "scene_id": "alarm.query",
+      "template_id": "tpl_alarm_topn",
+      "label": "查近24小时核心网告警Top10",
+      "keywords": ["告警", "top", "核心网", "全网"],
+      "negative_keywords": ["关联率", "相关性"],
+      "slot_schema": {
+        "required": ["object_scope", "time_range", "topn"],
+        "optional": ["severity", "region_id"]
+      },
+      "examples": [
+        "查近24小时核心网告警Top10",
+        "查近24小时全网告警Top20"
+      ]
+    },
+    {
+      "scene_id": "alarm.query",
+      "template_id": "tpl_interface_alarm_topn",
+      "label": "近24小时接口错误包告警Top10",
+      "keywords": ["接口", "错误包", "告警", "top"],
+      "negative_keywords": ["相关性", "关联率", "同比"],
+      "slot_schema": {
+        "required": ["object_scope", "time_range", "topn"],
+        "optional": ["region_id", "severity", "metric"]
+      },
+      "examples": [
+        "近24小时接口错误包告警Top10",
+        "近7天华南接口告警Top20"
+      ]
+    },
+    {
+      "scene_id": "alarm.query",
+      "template_id": "tpl_bgp_flap_topn",
+      "label": "近7天华东BGP flap Top20",
+      "keywords": ["bgp", "抖动", "flap", "top"],
+      "negative_keywords": ["相关性", "关联率"],
+      "slot_schema": {
+        "required": ["time_range", "topn", "protocol"],
+        "optional": ["region_id", "severity"]
+      },
+      "examples": [
+        "近24小时BGP抖动Top10",
+        "近7天华东BGP flap Top20"
+      ]
+    },
+    {
+      "scene_id": "alarm.query",
+      "template_id": "tpl_alarm_count_severity",
+      "label": "今天广州区域严重告警数量",
+      "keywords": ["严重", "告警", "数量"],
+      "negative_keywords": ["top", "关联率"],
+      "slot_schema": {
+        "required": ["time_range", "severity"],
+        "optional": ["region_id", "object_scope"]
+      },
+      "examples": [
+        "今天广州区域严重告警数量",
+        "近7天北京严重告警数"
+      ]
+    },
+    {
+      "scene_id": "alarm.query",
+      "template_id": "tpl_port_alarm_topn",
+      "label": "近24小时端口告警Top5",
+      "keywords": ["端口", "告警", "top"],
+      "negative_keywords": ["相关性", "同比"],
+      "slot_schema": {
+        "required": ["object_scope", "time_range", "topn"],
+        "optional": ["severity"]
+      },
+      "examples": [
+        "近24小时端口告警Top5",
+        "昨天端口告警Top10"
+      ]
+    },
+    {
+      "scene_id": "device.query",
+      "template_id": "tpl_device_cpu_hotspot",
+      "label": "近24小时设备CPU利用率Top10",
+      "keywords": ["cpu", "top", "设备"],
+      "negative_keywords": ["相关性", "关联率"],
+      "slot_schema": {
+        "required": ["time_range", "topn", "metric"],
+        "optional": ["region_id"]
+      },
+      "examples": [
+        "近24小时设备CPU利用率Top10",
+        "今天华北设备CPU Top20"
+      ]
+    },
+    {
+      "scene_id": "device.query",
+      "template_id": "tpl_device_offline_count",
+      "label": "昨天华东离线设备数",
+      "keywords": ["离线", "设备", "数量"],
+      "negative_keywords": ["关联率", "同比"],
+      "slot_schema": {
+        "required": ["region_id", "time_range"],
+        "optional": []
+      },
+      "examples": [
+        "昨天华东离线设备数",
+        "近24小时广州离线设备数量"
+      ]
+    },
+    {
+      "scene_id": "device.query",
+      "template_id": "tpl_alarm_trend_device",
+      "label": "近7天设备10.2.3.4告警趋势",
+      "keywords": ["设备", "告警", "趋势"],
+      "negative_keywords": ["相关性", "关联率"],
+      "slot_schema": {
+        "required": ["device_id", "time_range"],
+        "optional": ["severity"]
+      },
+      "examples": [
+        "近7天设备10.2.3.4告警趋势",
+        "今天设备A告警趋势"
+      ]
+    },
+    {
+      "scene_id": "alarm.analysis",
+      "template_id": "tpl_packet_loss_region_rank",
+      "label": "近7天各区域丢包率排名Top10",
+      "keywords": ["丢包率", "区域", "排名", "top"],
+      "negative_keywords": ["根因", "预测"],
+      "slot_schema": {
+        "required": ["time_range", "metric", "topn"],
+        "optional": ["region_id"]
+      },
+      "examples": [
+        "近7天各区域丢包率排名Top10",
+        "昨天地市丢包率Top5"
+      ]
+    }
+  ]
+}
+

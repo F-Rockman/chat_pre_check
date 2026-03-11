@@ -1,0 +1,2 @@
+"""Standalone template capability package."""
+
