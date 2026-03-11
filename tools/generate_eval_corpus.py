@@ -3,9 +3,20 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import urllib.request
+import sys
 from pathlib import Path
+from typing import Any
 
+ROOT = Path(__file__).resolve().parents[1]
+SRC = ROOT / "src"
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
+
+from template_capability.openai_client import (
+    build_openai_client,
+    extract_chat_completion_content,
+    parse_json_content,
+)
 
 DEFAULT_BASE_URL = "https://coding.dashscope.aliyuncs.com/v1"
 DEFAULT_MODEL = "qwen3-coder-plus"
@@ -58,31 +69,29 @@ def generate_corpus(
     base_url: str,
     model: str,
     config_text: str,
+    client: Any | None = None,
 ) -> dict[str, object]:
     """调用兼容 OpenAI 协议的模型生成一份评测语料。"""
-    payload = {
-        "model": model,
-        "messages": [
+    client = client or build_openai_client(
+        api_key=api_key,
+        base_url=base_url,
+        timeout_seconds=120,
+    )
+    # 这里不做复杂兜底处理；如果模型侧返回坏 JSON，应该直接暴露出来，方便调 prompt。
+    response = client.chat.completions.create(
+        model=model,
+        messages=[
             {"role": "system", "content": "You generate strict JSON for evaluation datasets."},
             {"role": "user", "content": build_prompt(config_text)},
         ],
         # 语料生成需要一定多样性，但仍然要避免过度发散。
-        "temperature": 0.5,
-    }
-    request = urllib.request.Request(
-        f"{base_url.rstrip('/')}/chat/completions",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
+        temperature=0.5,
+        response_format={"type": "json_object"},
     )
-    # 这里不做复杂兜底处理；如果模型侧返回坏 JSON，应该直接暴露出来，方便调 prompt。
-    with urllib.request.urlopen(request, timeout=120) as response:
-        body = json.load(response)
-    content = body["choices"][0]["message"]["content"]
-    return json.loads(content)
+    payload = parse_json_content(extract_chat_completion_content(response))
+    if payload is None:
+        raise ValueError("Model response did not contain a valid JSON object.")
+    return payload
 
 
 def main() -> None:

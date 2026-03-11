@@ -611,6 +611,12 @@ LLM 默认只用于离线造测试样本，不用于在线匹配主链路。
 
 - [fallback.py](D:/GitHub/chat_pre_check_blank/src/template_capability/fallback.py) 里的 `OpenAICompatibleTemplateSlotResolver`
 
+当前实现方式：
+
+- 使用 `openai` Python SDK
+- 通过 `base_url` 指向兼容 OpenAI 协议的供应商
+- 当前默认示例就是 DashScope 的兼容地址
+
 最小可用方式：
 
 1. 设置 `DASHSCOPE_API_KEY`

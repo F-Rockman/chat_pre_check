@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import json
-import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Protocol
-from urllib import request
 
 from template_capability.models import MatchStatus, TemplateCandidate, TemplateDefinition
+from template_capability.openai_client import (
+    build_openai_client,
+    extract_chat_completion_content,
+    parse_json_content,
+)
 
 
 @dataclass(slots=True)
@@ -55,10 +58,6 @@ class LLMTemplateSlotResolver(Protocol):
     ) -> SlotFallbackSuggestion | None:
         ...
 
-
-_JSON_BLOCK_RE = re.compile(r"\{.*\}", re.DOTALL)
-
-
 @dataclass(slots=True)
 class OpenAICompatibleTemplateSlotResolver:
     """面向 OpenAI 兼容协议的模板级补参实现。"""
@@ -66,6 +65,7 @@ class OpenAICompatibleTemplateSlotResolver:
     base_url: str
     model: str
     timeout_seconds: float = 5.0
+    client: Any | None = field(default=None, repr=False, compare=False)
 
     def resolve_slots(
         self,
@@ -212,51 +212,15 @@ class OpenAICompatibleTemplateSlotResolver:
         return hints
 
     def _post_json(self, payload: dict[str, Any]) -> dict[str, Any] | None:
-        """最小化的 HTTP 调用层，只负责拿到 JSON 响应。"""
-        endpoint = self.base_url.rstrip("/") + "/chat/completions"
-        req = request.Request(
-            endpoint,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.api_key}",
-            },
-            method="POST",
-        )
+        """用 openai 客户端发起 chat completion，并解析成 JSON。"""
         try:
-            with request.urlopen(req, timeout=self.timeout_seconds) as response:
-                body = response.read().decode("utf-8")
+            client = self.client or build_openai_client(
+                api_key=self.api_key,
+                base_url=self.base_url,
+                timeout_seconds=self.timeout_seconds,
+            )
+            response = client.chat.completions.create(**payload)
         except Exception:
             # fallback 失败不应该打断主链路，所以统一吞掉异常并返回 None。
             return None
-        try:
-            response_payload = json.loads(body)
-        except json.JSONDecodeError:
-            return None
-        content = (
-            response_payload.get("choices", [{}])[0]
-            .get("message", {})
-            .get("content", "")
-        )
-        if isinstance(content, list):
-            content = "".join(
-                str(item.get("text", ""))
-                for item in content
-                if isinstance(item, dict)
-            )
-        if not isinstance(content, str):
-            return None
-        content = content.strip()
-        if not content:
-            return None
-        try:
-            return json.loads(content)
-        except json.JSONDecodeError:
-            # 某些兼容实现会在 JSON 前后包一层解释文本，这里做一次兜底提取。
-            match = _JSON_BLOCK_RE.search(content)
-            if match is None:
-                return None
-            try:
-                return json.loads(match.group(0))
-            except json.JSONDecodeError:
-                return None
+        return parse_json_content(extract_chat_completion_content(response))

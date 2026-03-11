@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import math
 from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, Protocol
-from urllib import request
 
+from template_capability.openai_client import build_openai_client
 from template_capability.scoring import mixed_terms
 
 
@@ -158,6 +157,7 @@ class RemoteEmbeddingProvider:
     batch_size: int = 32
     extra_body: dict[str, Any] = field(default_factory=dict)
     include_dimensions: bool = True
+    client: Any | None = field(default=None, repr=False, compare=False)
 
     def prepare_documents(self, documents: dict[str, str]) -> None:
         # 远端 embedding 通常不需要本地预训练步骤。
@@ -178,24 +178,23 @@ class RemoteEmbeddingProvider:
         }
         if self.include_dimensions and self.dimension > 0:
             payload["dimensions"] = self.dimension
-        req = request.Request(
-            self.base_url.rstrip("/") + "/embeddings",
-            data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.api_key}",
-            },
-            method="POST",
+        client = self.client or build_openai_client(
+            api_key=self.api_key,
+            base_url=self.base_url,
+            timeout_seconds=self.timeout_seconds,
         )
-        with request.urlopen(req, timeout=self.timeout_seconds) as response:
-            response_payload = json.load(response)
-        data = response_payload.get("data", [])
+        response = client.embeddings.create(**payload)
+        data = getattr(response, "data", [])
         indexed_embeddings: list[tuple[int, list[float]]] = []
         for item in data:
-            if not isinstance(item, dict):
+            if hasattr(item, "embedding"):
+                embedding = getattr(item, "embedding")
+                index = int(getattr(item, "index", len(indexed_embeddings)))
+            elif isinstance(item, dict):
+                embedding = item.get("embedding")
+                index = int(item.get("index", len(indexed_embeddings)))
+            else:
                 continue
-            embedding = item.get("embedding")
-            index = int(item.get("index", len(indexed_embeddings)))
             if not isinstance(embedding, list):
                 continue
             indexed_embeddings.append((index, [float(value) for value in embedding]))
