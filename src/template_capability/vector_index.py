@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import math
+from collections import Counter
 from dataclasses import dataclass, field
-from typing import Protocol
+from typing import Any, Protocol
+from urllib import request
 
 from template_capability.scoring import mixed_terms
 
@@ -11,25 +14,25 @@ from template_capability.scoring import mixed_terms
 class VectorProvider(Protocol):
     """向量提供器接口。
 
-    这里故意只保留最小协议：
-    - `dimension`: 声明输出维度
-    - `embed_texts`: 批量把文本转成向量
-
-    这样后续替换成外部 512 维向量服务时，不需要改动检索主流程。
+    这层只负责“把文本编码成固定维度向量”，不负责检索。
+    本地 provider 和远端 embedding 接口都遵守同一套协议。
     """
 
     dimension: int
+
+    def prepare_documents(self, documents: dict[str, str]) -> None:
+        """可选的语料预热步骤。
+
+        本地 provider 可以利用模板文档构建词表或 IDF；
+        远端 provider 通常什么都不需要做，可以保持 no-op。
+        """
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
         ...
 
 
 class VectorSearchBackend(Protocol):
-    """向量检索后端接口。
-
-    当前默认实现是内存版全量扫描；如果后续接 ANN 或外部检索服务，
-    只需要实现同样的 `build/search` 两个方法。
-    """
+    """向量检索后端接口。"""
 
     def build(self, documents: dict[str, str]) -> None:
         ...
@@ -39,31 +42,165 @@ class VectorSearchBackend(Protocol):
 
 
 @dataclass(slots=True)
-class HashingVectorProvider:
-    """本地默认向量提供器，接口和外部 512 维实现保持一致。"""
+class LocalHashVectorProvider:
+    """轻量本地 hashing 向量。
+
+    这是最朴素的本地实现，主要用于：
+    - 兼容旧测试和旧行为
+    - 在不需要更强本地效果时提供极简占位实现
+    """
 
     dimension: int = 512
 
+    def prepare_documents(self, documents: dict[str, str]) -> None:
+        # 纯 hashing 不依赖语料统计信息。
+        return None
+
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
-        # 外部接口通常天然支持批量编码，这里也保持同样的调用形态。
         return [self._embed_one(text) for text in texts]
 
     def _embed_one(self, text: str) -> list[float]:
-        # 这不是语义 embedding，而是一个廉价的 hashing trick 占位实现。
-        # 它的价值主要有两个：
-        # 1. 本地无外部依赖时也能跑完整向量召回链路
-        # 2. 逼着主流程始终按“可替换向量接口”设计，而不是写死某个供应商
         vector = [0.0] * self.dimension
         for term in mixed_terms(text):
-            digest = hashlib.blake2b(term.encode("utf-8"), digest_size=8).digest()
-            bucket = int.from_bytes(digest[:4], "big") % self.dimension
-            sign = 1.0 if digest[4] % 2 == 0 else -1.0
+            bucket, sign = _signed_bucket(term, self.dimension)
             vector[bucket] += sign
-        norm = math.sqrt(sum(value * value for value in vector))
-        if norm == 0:
+        return _l2_normalize(vector)
+
+
+@dataclass(slots=True)
+class LocalTfidfVectorProvider:
+    """默认本地向量实现。
+
+    它不是大模型 embedding，但比单纯 hashing 更完整，核心做法是：
+    1. 基于模板语料统计 term 的 IDF
+    2. 对高价值 term 分配显式维度，避免碰撞
+    3. 其余 term 走 overflow hashing，保留固定 512 维接口
+
+    这种设计很适合你当前这类“模板数不大、领域词明确”的问数场景。
+    """
+
+    dimension: int = 512
+    overflow_bucket_count: int = 128
+    term_importance_power: float = 1.0
+    idf_by_term: dict[str, float] = field(init=False, default_factory=dict)
+    vocabulary: dict[str, int] = field(init=False, default_factory=dict)
+    overflow_offset: int = field(init=False, default=0)
+    total_docs: int = field(init=False, default=1)
+    default_idf: float = field(init=False, default=1.0)
+
+    def prepare_documents(self, documents: dict[str, str]) -> None:
+        """根据模板文档构建本地词表和 IDF。"""
+        self.total_docs = max(1, len(documents))
+        document_terms = [Counter(_vector_terms(text)) for text in documents.values()]
+        document_frequency: Counter[str] = Counter()
+        for terms in document_terms:
+            document_frequency.update(terms.keys())
+
+        self.idf_by_term = {
+            term: _bm25_idf(doc_freq, self.total_docs)
+            for term, doc_freq in document_frequency.items()
+        }
+        self.default_idf = _bm25_idf(0, self.total_docs)
+
+        # 高价值 term 走显式维度，减少模板核心词之间的哈希碰撞。
+        term_importance: dict[str, float] = {}
+        for terms in document_terms:
+            for term, freq in terms.items():
+                tf = 1.0 + math.log(freq)
+                idf = self.idf_by_term.get(term, self.default_idf)
+                term_importance[term] = term_importance.get(term, 0.0) + tf * (idf ** self.term_importance_power)
+
+        reserved_overflow = min(max(16, self.overflow_bucket_count), max(1, self.dimension // 2))
+        explicit_capacity = max(1, self.dimension - reserved_overflow)
+        ranked_terms = sorted(term_importance.items(), key=lambda item: (-item[1], item[0]))
+        self.vocabulary = {
+            term: index
+            for index, (term, _) in enumerate(ranked_terms[:explicit_capacity])
+        }
+        self.overflow_offset = len(self.vocabulary)
+
+    def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        return [self._embed_one(text) for text in texts]
+
+    def _embed_one(self, text: str) -> list[float]:
+        vector = [0.0] * self.dimension
+        term_counts = Counter(_vector_terms(text))
+        if not term_counts:
             return vector
-        # 统一做 L2 归一化，后续 cosine 相似度才有稳定意义。
-        return [value / norm for value in vector]
+
+        overflow_buckets = max(0, self.dimension - self.overflow_offset)
+        for term, freq in term_counts.items():
+            weight = (1.0 + math.log(freq)) * self.idf_by_term.get(term, self.default_idf)
+            explicit_index = self.vocabulary.get(term)
+            if explicit_index is not None:
+                vector[explicit_index] += weight
+                continue
+            if overflow_buckets <= 0:
+                continue
+            bucket, sign = _signed_bucket(term, overflow_buckets)
+            vector[self.overflow_offset + bucket] += sign * weight
+        return _l2_normalize(vector)
+
+
+@dataclass(slots=True)
+class RemoteEmbeddingProvider:
+    """远端 embedding 接口适配器。
+
+    它负责把任意兼容 `/embeddings` 风格接口的服务接到当前向量链路上。
+    主流程仍然只认 `VectorProvider`，因此无需改 `engine.py`。
+    """
+
+    api_key: str
+    base_url: str
+    model: str
+    dimension: int = 512
+    timeout_seconds: float = 10.0
+    batch_size: int = 32
+    extra_body: dict[str, Any] = field(default_factory=dict)
+    include_dimensions: bool = True
+
+    def prepare_documents(self, documents: dict[str, str]) -> None:
+        # 远端 embedding 通常不需要本地预训练步骤。
+        return None
+
+    def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        embeddings: list[list[float]] = []
+        for start in range(0, len(texts), max(1, self.batch_size)):
+            batch = texts[start : start + max(1, self.batch_size)]
+            embeddings.extend(self._embed_batch(batch))
+        return embeddings
+
+    def _embed_batch(self, texts: list[str]) -> list[list[float]]:
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "input": texts,
+            **self.extra_body,
+        }
+        if self.include_dimensions and self.dimension > 0:
+            payload["dimensions"] = self.dimension
+        req = request.Request(
+            self.base_url.rstrip("/") + "/embeddings",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.api_key}",
+            },
+            method="POST",
+        )
+        with request.urlopen(req, timeout=self.timeout_seconds) as response:
+            response_payload = json.load(response)
+        data = response_payload.get("data", [])
+        indexed_embeddings: list[tuple[int, list[float]]] = []
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            embedding = item.get("embedding")
+            index = int(item.get("index", len(indexed_embeddings)))
+            if not isinstance(embedding, list):
+                continue
+            indexed_embeddings.append((index, [float(value) for value in embedding]))
+        indexed_embeddings.sort(key=lambda item: item[0])
+        return [embedding for _, embedding in indexed_embeddings]
 
 
 @dataclass(slots=True)
@@ -74,7 +211,8 @@ class InMemoryVectorIndex:
     vectors: dict[str, list[float]] = field(default_factory=dict)
 
     def build(self, documents: dict[str, str]) -> None:
-        # build 只在引擎初始化时做一次，把模板文档预编码后常驻内存。
+        # 先让 provider 基于模板语料做一次预热，再统一编码模板文档。
+        self.provider.prepare_documents(documents)
         doc_ids = list(documents.keys())
         embeddings = self.provider.embed_texts([documents[doc_id] for doc_id in doc_ids])
         self.vectors = {
@@ -85,8 +223,6 @@ class InMemoryVectorIndex:
     def search(self, query_text: str, top_k: int) -> list[tuple[str, float]]:
         if not self.vectors:
             return []
-        # query 在线只编码一次，然后对当前模板全集做相似度排序。
-        # 在 1000 级模板规模下，全量扫描仍然足够快。
         query_vector = self.provider.embed_texts([query_text])[0]
         results = [
             (doc_id, _cosine_similarity(query_vector, vector))
@@ -96,10 +232,39 @@ class InMemoryVectorIndex:
         return results[:top_k]
 
 
+# 兼容旧命名，避免外部已有代码直接 import `HashingVectorProvider` 时立刻断掉。
+HashingVectorProvider = LocalHashVectorProvider
+
+
+def _vector_terms(text: str) -> list[str]:
+    """本地向量化使用的特征项。
+
+    当前直接复用 `mixed_terms`，让 lexical 和 vector 至少共享一套稳定的基础切词。
+    """
+    return mixed_terms(text)
+
+
+def _bm25_idf(doc_freq: int, total_docs: int) -> float:
+    return math.log(1 + (total_docs - doc_freq + 0.5) / (doc_freq + 0.5))
+
+
+def _signed_bucket(term: str, bucket_count: int) -> tuple[int, float]:
+    digest = hashlib.blake2b(term.encode("utf-8"), digest_size=8).digest()
+    bucket = int.from_bytes(digest[:4], "big") % max(1, bucket_count)
+    sign = 1.0 if digest[4] % 2 == 0 else -1.0
+    return bucket, sign
+
+
+def _l2_normalize(vector: list[float]) -> list[float]:
+    norm = math.sqrt(sum(value * value for value in vector))
+    if norm == 0:
+        return vector
+    return [value / norm for value in vector]
+
+
 def _cosine_similarity(left: list[float], right: list[float]) -> float:
     """返回 0-1 区间内的 cosine 分数。"""
     if not left or not right:
         return 0.0
     total = sum(lv * rv for lv, rv in zip(left, right, strict=True))
-    # 标准 cosine 是 [-1, 1]，这里线性映射到 [0, 1]，方便和其他子分统一融合。
     return max(0.0, min(1.0, (total + 1.0) / 2.0))

@@ -32,8 +32,8 @@ from template_capability.scoring import (
     weighted_score,
 )
 from template_capability.vector_index import (
-    HashingVectorProvider,
     InMemoryVectorIndex,
+    LocalTfidfVectorProvider,
     VectorSearchBackend,
 )
 
@@ -82,7 +82,7 @@ class TemplateCapabilityEngine:
             config.settings.lexical_field_weights,
         )
         self.vector_backend = vector_backend or InMemoryVectorIndex(
-            provider=HashingVectorProvider(config.settings.vector_dimension)
+            provider=LocalTfidfVectorProvider(config.settings.vector_dimension)
         )
         self.vector_backend.build(self.template_documents)
 

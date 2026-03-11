@@ -456,10 +456,22 @@ total_score =
 
 当前默认实现：
 
-- `HashingVectorProvider`
+- `LocalTfidfVectorProvider`
+- `LocalHashVectorProvider`
 - `InMemoryVectorIndex`
 
-这只是本地占位实现，便于测试和脱离外部服务运行。
+说明：
+
+- `LocalTfidfVectorProvider`
+  这是当前默认本地实现
+  会基于模板语料统计 IDF，并把高价值 term 放进显式维度，剩余 term 走 overflow hashing
+  对当前这种模板数不大、领域词明确的问数场景，比单纯 hashing 更稳
+- `LocalHashVectorProvider`
+  这是保留的轻量兼容实现
+  适合极简本地测试或需要完全无状态 provider 的场景
+- `RemoteEmbeddingProvider`
+  用于后续接真实远端 embedding 接口
+  主流程仍然保持 `512` 维可替换设计
 
 后续替换真实向量服务时，建议保持同样的职责边界：
 
