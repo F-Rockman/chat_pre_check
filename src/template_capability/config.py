@@ -16,7 +16,13 @@ from template_capability.models import (
 
 @dataclass(slots=True)
 class TemplateConfig:
-    """模板能力完整配置。"""
+    """模板能力完整配置。
+
+    这是配置文件加载后的根对象，按职责拆成三块：
+    - `settings`: 全局匹配策略
+    - `slot_extractors`: 根级共享槽位定义
+    - `templates`: 具体模板列表
+    """
 
     settings: MatcherSettings
     slot_extractors: dict[str, SlotExtractorDefinition]
@@ -57,6 +63,7 @@ def load_template_config(path: str | Path) -> TemplateConfig:
         llm_slot_fallback_allow_on_matched=bool(slot_fallback_payload.get("allow_on_matched", False)),
     )
 
+    # 根级 slot_extractors 是共享定义，只在模板本地未覆写时才会生效。
     slot_extractors = {
         str(slot_name): SlotExtractorDefinition(
             slot_name=str(slot_name),
@@ -70,6 +77,7 @@ def load_template_config(path: str | Path) -> TemplateConfig:
         if isinstance(definition, dict)
     }
 
+    # templates 是实际参与召回和匹配的对象；每条模板都会被标准化成强类型 dataclass。
     templates = [
         TemplateDefinition(
             template_id=str(item["template_id"]),
@@ -114,6 +122,7 @@ def load_template_config(path: str | Path) -> TemplateConfig:
 
 
 def _normalize_constraint_values(values: Any) -> list[Any]:
+    # 配置层允许单值或列表写法，运行时统一转成列表，简化后续判断逻辑。
     if isinstance(values, list):
         return values
     return [values]
