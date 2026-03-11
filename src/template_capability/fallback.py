@@ -84,6 +84,7 @@ class OpenAICompatibleTemplateSlotResolver:
         ] or [str(slot_name) for slot_name in missing_slots]
         if not target_slots:
             return None
+        # 记录真实耗时，后续 benchmark 会直接拿这个字段评估是否值得开兜底。
         start = time.perf_counter()
         payload = {
             "model": self.model,
@@ -108,6 +109,7 @@ class OpenAICompatibleTemplateSlotResolver:
                     ),
                 },
             ],
+            # 要求供应商直接返回 JSON，减少后处理和幻觉解释文本。
             "response_format": {"type": "json_object"},
         }
         raw = self._post_json(payload)
@@ -115,6 +117,7 @@ class OpenAICompatibleTemplateSlotResolver:
         if raw is None:
             return None
         slots_payload = raw.get("slots")
+        # 这里只接受 {"slots": {...}} 这一种窄格式，避免把模型自由文本当结果。
         if not isinstance(slots_payload, dict) or not slots_payload:
             return None
         return SlotFallbackSuggestion(
@@ -140,6 +143,8 @@ class OpenAICompatibleTemplateSlotResolver:
         """把模板配置和当前缺失槽位收束成一个非常窄的提参任务。"""
         instructions = str(template.llm_slot_extraction.get("instructions", "")).strip()
         slot_hints = self._build_slot_hints(template, target_slots)
+        # prompt 里显式给出已知槽位、缺失槽位和 extractor 提示，
+        # 让模型做的是“补全”，不是重新理解整道题。
         return (
             f"template_id: {template.template_id}\n"
             f"description: {template.description}\n"
@@ -171,6 +176,7 @@ class OpenAICompatibleTemplateSlotResolver:
             for extractor in definition.extractors:
                 extractor_type = str(extractor.get("type", ""))
                 if extractor_type == "keyword_value":
+                    # keyword_value 的 cases 可以直接暴露给模型，告诉它允许的离散值范围。
                     slot_hint.append(
                         {
                             "type": "keyword_value",
@@ -185,6 +191,7 @@ class OpenAICompatibleTemplateSlotResolver:
                         }
                     )
                 elif extractor_type == "regex":
+                    # regex 不能直接强迫模型“跑正则”，但可以把值类型和范围提示给它。
                     slot_hint.append(
                         {
                             "type": "regex",
@@ -220,6 +227,7 @@ class OpenAICompatibleTemplateSlotResolver:
             with request.urlopen(req, timeout=self.timeout_seconds) as response:
                 body = response.read().decode("utf-8")
         except Exception:
+            # fallback 失败不应该打断主链路，所以统一吞掉异常并返回 None。
             return None
         try:
             response_payload = json.loads(body)

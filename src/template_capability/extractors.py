@@ -35,6 +35,7 @@ class KeywordValueExtractor:
             terms = [normalize_text(str(term)) for term in case.get("terms", [])]
             if not terms:
                 continue
+            # 任意一个近义词命中就算该 case 成立；case 的先后顺序就是优先级。
             if any(term and term in text for term in terms):
                 return copy.deepcopy(case.get("value"))
         return None
@@ -70,12 +71,14 @@ class RegexValueExtractor:
             if not match:
                 continue
             if fixed_value is not None:
+                # 某些 regex 只负责识别一个表达，不需要读取分组值，直接返回固定配置值。
                 return copy.deepcopy(fixed_value)
             raw_value = match.group(group)
             value = _cast_value(raw_value, value_type)
             if value is None:
                 continue
             if isinstance(value, (int, float)):
+                # min/max 允许在配置层提前拦掉明显异常的阈值。
                 if min_value is not None and value < min_value:
                     continue
                 if max_value is not None and value > max_value:
@@ -104,6 +107,7 @@ def build_slot_registry(
                         patterns=[dict(pattern) for pattern in extractor.get("patterns", [])]
                     )
                 )
+        # 配置里某个 slot 即使没有合法 extractor，也保留空列表，方便后面统一遍历。
         extractors[slot_name] = slot_extractors
     return SlotExtractorRegistry(extractors)
 
@@ -119,6 +123,8 @@ class SlotExtractorRegistry:
             for extractor in slot_extractors:
                 value = extractor.extract(text)
                 if value not in (None, ""):
+                    # 同一槽位一旦命中，就不再继续尝试后续 extractor，
+                    # 这样模板作者可以通过配置顺序表达优先级。
                     slots[slot_name] = value
                     break
         return slots

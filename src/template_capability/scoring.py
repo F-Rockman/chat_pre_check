@@ -21,12 +21,15 @@ def mixed_terms(text: str) -> list[str]:
     for chunk in chunks:
         if not chunk:
             continue
+        # 先保留完整 token，保证精确命中的领域词有足够权重。
         terms.append(chunk)
         if _contains_cjk(chunk):
+            # 中文缺少天然空格分词，用 2/3-gram 吸收语序变化、口语缩写和轻微错字。
             terms.extend(_char_ngrams(chunk, 2))
             if len(chunk) >= 3:
                 terms.extend(_char_ngrams(chunk, 3))
         elif len(chunk) >= 4:
+            # 英文或数字串不过度切碎，只补 3-gram 兼顾 typo 容错。
             terms.extend(_char_ngrams(chunk, 3))
     return terms or [text.lower()]
 
@@ -90,6 +93,7 @@ class BM25Index:
         self.total_docs = doc_count
 
     def search(self, query_text: str, top_k: int) -> list[tuple[str, float]]:
+        # query 侧和模板侧使用同一套 mixed_terms，保证 lexical 召回的口径一致。
         query_terms = mixed_terms(query_text)
         results = [
             (doc_id, self._score_doc(query_terms, doc_id))
@@ -103,6 +107,7 @@ class BM25Index:
         doc_length = self.doc_lengths.get(doc_id, 0)
         score = 0.0
         for term in query_terms:
+            # query 里没出现、或模板文档里没命中的词，直接跳过，不做平滑补偿。
             freq = term_freq.get(term)
             if not freq:
                 continue
@@ -146,6 +151,8 @@ class BM25FieldIndex:
         self.avg_field_lengths = {}
         self.field_doc_freqs = {}
         for field_name in self.field_weights:
+            # BM25F 需要维护每个字段自己的平均长度和文档频次，
+            # 否则 utterances / must_terms / description 的长度差异会互相污染。
             total_length = sum(
                 self.doc_lengths[doc_id].get(field_name, 0)
                 for doc_id in self.documents
@@ -158,6 +165,7 @@ class BM25FieldIndex:
             self.field_doc_freqs[field_name] = doc_freqs
 
     def search(self, query_text: str, top_k: int) -> list[tuple[str, float]]:
+        # 每个字段先独立打分，最后再按字段权重汇总。
         query_terms = mixed_terms(query_text)
         results = [
             (doc_id, self._score_doc(query_terms, doc_id))
@@ -179,6 +187,8 @@ class BM25FieldIndex:
         doc_freqs = self.field_doc_freqs.get(field_name, Counter())
         score = 0.0
         for term in query_terms:
+            # 字段级 BM25 只在当前字段局部统计 tf/idf，
+            # 这样 must_terms 的短字段不会被 description 的长文本掩盖。
             freq = term_freq.get(term)
             if not freq:
                 continue
@@ -210,6 +220,7 @@ def reciprocal_rank_fusion(
     """RRF 只看 rank，不依赖各路原始分是否同尺度。"""
     fused: dict[str, float] = {}
     for ranking in rankings:
+        # rank 越靠前，贡献越大；哪怕原始分量纲不同，也能在同一空间里融合。
         for rank, (doc_id, _) in enumerate(ranking, start=1):
             fused[doc_id] = fused.get(doc_id, 0.0) + 1.0 / (rrf_k + rank)
     if not fused:
@@ -258,6 +269,8 @@ def structural_alignment_score(
 
     total_weight = sum(_slot_signal_weight(slot_name) for slot_name in extracted_slots)
     unexpected_slots = extracted_slots - supported_slots
+    # query 里多抽出来但模板不支持的条件，会拉低 coverage，
+    # 解决“多条件 query 错配到单条件模板”的问题。
     unexpected_weight = sum(_slot_signal_weight(slot_name) for slot_name in unexpected_slots)
     coverage_score = 1.0 - unexpected_weight / max(1.0, total_weight)
 
@@ -282,6 +295,7 @@ def structural_alignment_score(
     if not required_filter_slots:
         return clamp_score(0.55 * coverage_score + 0.45 * filter_score)
 
+    # 对必须出现的过滤条件再单独算一遍完整度，避免 query 缺半个条件时仍被高分放过。
     required_filter_weight = sum(_slot_signal_weight(slot_name) for slot_name in required_filter_slots)
     matched_required_filter_weight = sum(
         _slot_signal_weight(slot_name)
@@ -310,6 +324,7 @@ def constraint_score(
     if template.must_terms:
         matched_groups = 0
         for group in template.must_terms:
+            # must_terms 按组计算，只要求每组里任意一个近义词命中即可。
             if any(term.lower() in lowered for term in group):
                 matched_groups += 1
         must_score = matched_groups / len(template.must_terms)
@@ -319,6 +334,7 @@ def constraint_score(
         extracted = slots.get(slot_name)
         if extracted in (None, ""):
             if slot_name in template.required_slots:
+                # 约束字段本身又是必填时，缺失要明确计 0 分。
                 slot_constraint_scores.append(0.0)
             continue
         slot_constraint_scores.append(1.0 if _matches_allowed_values(extracted, allowed_values) else 0.0)
@@ -357,6 +373,8 @@ def adaptive_score_weights(
     if complexity <= 0:
         return _normalize_weights(weights)
 
+    # query 越复杂，纯文本相似度越容易误导，因此适度下调 lexical/vector，
+    # 把更多权重让给结构和槽位完整度。
     for key in ("lexical", "sample", "vector"):
         if key in weights:
             weights[key] *= 1.0 - (0.15 + (0.05 if key == "vector" else 0.0)) * complexity
@@ -430,8 +448,10 @@ def _flatten_value(value: Any) -> set[str]:
 def _slot_signal_weight(slot_name: str) -> float:
     """不同槽位对结构判断的价值不同。"""
     if slot_name in LOW_SIGNAL_SLOTS:
+        # 时间、区域对问数模板通常只是修饰信息，不应该像过滤条件那样强影响结构分。
         return 0.5
     if slot_name.endswith("_threshold"):
+        # 阈值条件往往决定模板颗粒度，权重给得更高。
         return 1.5
     if slot_name in FILTER_SLOTS:
         return 1.25
