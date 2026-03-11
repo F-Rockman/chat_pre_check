@@ -99,6 +99,13 @@ python main.py --input "过去24小时接口错包告警前10名"
 python main.py --interactive
 ```
 
+开启模板级 LLM 补参：
+
+```bash
+$env:DASHSCOPE_API_KEY="***"
+python main.py --llm-slot-fallback --input "近24小时接口错误包告警前十"
+```
+
 运行测试：
 
 ```bash
@@ -162,16 +169,64 @@ python -m pytest -q
 
 示例字段：
 
-- `match_threshold`：命中阈值
-- `ambiguity_margin`：top1 和 top2 过近时返回 `-1`
-- `recall_top_k`：召回候选数
-- `weights`：`lexical / sample / vector / fusion / slot_fit / constraint / structure` 重排权重
-- `lexical_field_weights`：`description / utterances / must_terms` 的 BM25F 字段权重
-- `fusion_rrf_k`：RRF 倒数排序融合参数
-- `vector.dimension`：向量维度，当前按 `512` 设计
-- `blocked_terms`：全局拦截词，命中后直接 `unmatched`
-- `llm_fallback`：可选兜底开关，默认关闭
-- `llm_slot_fallback`：命中模板后的可选 LLM 补参开关，默认关闭
+- `match_threshold`
+  最终总分达到这个阈值才允许进入 `matched / partial`
+  值越低，召回更激进，但误匹配会增加
+- `ambiguity_margin`
+  top1 和 top2 的分差小于这个值时直接返回 `-1`
+  用来避免两个模板都像时硬选错
+- `recall_top_k`
+  每一路召回保留多少候选进入融合
+  模板规模在几百到一两千时，`20-50` 通常够用
+- `weights`
+  最终重排时各子分数的基础权重
+  当前支持：`lexical / sample / vector / fusion / slot_fit / constraint / structure`
+- `lexical_field_weights`
+  BM25F 的字段权重
+  当前字段：`description / utterances / must_terms`
+  一般 `must_terms` 应该最高，因为它决定模板语义锚点
+- `fusion_rrf_k`
+  RRF 的倒数排序参数
+  值越大，不同召回路之间的 rank 差异被压得越平
+- `vector.dimension`
+  向量维度
+  当前主流程按 `512` 维设计，后续替换真实向量接口时保持一致即可
+- `blocked_terms`
+  全局拦截词
+  命中后直接返回 `unmatched`
+  适合放 `报告 / 分析 / 总结 / 根因 / 预测` 这类明确非问数词
+- `llm_fallback`
+  模板选择阶段的 LLM 兜底
+  只建议在 `partial` 或接近阈值的 `unmatched` 上窄触发
+  不建议作为主链路能力
+- `llm_slot_fallback`
+  模板已命中后的 LLM 补参开关
+  这是当前更推荐的用法
+  只在 top1 模板比较稳定，但还有少量关键槽位没抽到时补参
+
+`weights` 的含义：
+
+- `lexical`
+  BM25F 词法匹配分
+  适合稳住领域关键词、固定词组
+- `sample`
+  基于模板示例问法的 `char ngram` 相似度
+  对语序变化、轻微口语化更稳
+- `vector`
+  向量召回分
+  用来处理更弱的表达改写
+- `fusion`
+  多路召回经 RRF 融合后的排序分
+  用来减少单一路召回偏置
+- `slot_fit`
+  槽位覆盖度
+  query 抽到的关键参数越齐，分越高
+- `constraint`
+  模板约束分
+  包括 `must_terms` 命中和 `slot_constraints` 一致性
+- `structure`
+  结构一致性分
+  用来惩罚“query 有的条件模板接不住”或“模板要求的关键过滤条件没给全”
 
 建议：
 
@@ -179,6 +234,20 @@ python -m pytest -q
 - `blocked_terms` 主要放非问数意图词，如 `报告 / 分析 / 根因 / 预测`
 - `llm_fallback` 只建议在 `partial` 或接近阈值的 `unmatched` 上窄触发
 - `llm_slot_fallback` 只建议在 top1 模板已稳定命中、但缺少少量关键参数时触发
+
+`llm_slot_fallback` 细项：
+
+- `enabled`
+  是否启用模板级 LLM 补参
+- `max_missing_slots`
+  最多允许缺多少个必填槽位时触发 LLM
+  建议控制在 `1-2`
+- `min_score`
+  top1 模板分数至少达到多少才允许触发 LLM
+  这能避免把 LLM 用在本来就不稳定的命中上
+- `allow_on_matched`
+  即使已经 `matched`，是否还允许 LLM 二次补参
+  默认建议关闭，除非你确实需要补充可选槽位
 
 ### slot_extractors
 
@@ -268,6 +337,23 @@ python -m pytest -q
 - `llm_slot_extraction`：该模板的可选 LLM 补参配置
 - `metadata`：业务透传字段
 
+重点字段解释：
+
+- `must_terms`
+  这是模板的语义锚点
+  每组里命中任意一个词就算该组通过
+  如果一个模板很容易和别的模板打架，先加固这里
+- `slot_constraints`
+  用来限制抽出来的槽位值必须落在模板允许范围内
+  比如 `query_operator` 必须是 `list`，或者 `severity` 必须是 `critical`
+- `slot_extractors`
+  当前推荐的参数定义位置
+  模板需要什么参数，就在模板内定义什么参数
+  不追求全局统一参数字典
+- `llm_slot_extraction`
+  控制该模板是否允许 LLM 补参，以及补哪些槽位
+  这是模板级开关，不是全局一刀切
+
 模板示例：
 
 ```json
@@ -297,11 +383,27 @@ python -m pytest -q
       "extractors": []
     }
   },
+  "llm_slot_extraction": {
+    "enabled": true,
+    "slots": ["time_range", "region_id", "query_operator"],
+    "instructions": "仅补充时间、区域和数量算子，不要发明额外条件。"
+  },
   "metadata": {
     "metric_code": "device_offline_count"
   }
 }
 ```
+
+`llm_slot_extraction` 字段说明：
+
+- `enabled`
+  该模板是否允许走 LLM 补参
+- `slots`
+  允许 LLM 补的槽位白名单
+  不在这个列表里的槽位，即使缺失也不让 LLM 填
+- `instructions`
+  给 LLM 的模板级补充说明
+  这里最好写成非常窄的约束，而不是泛泛的自然语言说明
 
 ## 匹配算法
 
@@ -492,6 +594,19 @@ LLM 默认只用于离线造测试样本，不用于在线匹配主链路。
 
 - [fallback.py](D:/GitHub/chat_pre_check_blank/src/template_capability/fallback.py) 里的 `OpenAICompatibleTemplateSlotResolver`
 
+最小可用方式：
+
+1. 设置 `DASHSCOPE_API_KEY`
+2. 使用 [main.py](D:/GitHub/chat_pre_check_blank/main.py) 的 `--llm-slot-fallback`
+3. 只让它在模板已经比较稳定命中、但缺少少量关键参数时补参
+
+当前 `main.py` 额外支持：
+
+- `--llm-slot-fallback`
+- `--llm-slot-base-url`
+- `--llm-slot-model`
+- `--llm-slot-timeout`
+
 脚本在 [generate_eval_corpus.py](D:/GitHub/chat_pre_check_blank/tools/generate_eval_corpus.py)。
 
 命令：
@@ -518,6 +633,39 @@ python tools/generate_eval_corpus.py
 - 生成样本后不要直接全量信任
 - 需要人工筛掉不合理样本
 - 最终应该把确认后的样本固化到静态评测集
+
+## LLM 补参评测
+
+已经提供一个在线 benchmark 脚本：
+
+- [benchmark_llm_slot_fallback.py](D:/GitHub/chat_pre_check_blank/tools/benchmark_llm_slot_fallback.py)
+
+命令：
+
+```bash
+$env:DASHSCOPE_API_KEY="***"
+python tools/benchmark_llm_slot_fallback.py
+python tools/benchmark_llm_slot_fallback.py --json
+```
+
+这个脚本会对一组“规则抽参容易漏，但模板语义其实已经命中”的样例做对比：
+
+- 不开 LLM 时的结果
+- 开 LLM 补参后的结果
+- 每条 query 的总耗时
+- 每次 LLM 调用自身的耗时
+
+另外还提供了一条默认跳过的在线测试：
+
+- [test_live_llm_slot_fallback.py](D:/GitHub/chat_pre_check_blank/tests/test_live_llm_slot_fallback.py)
+
+手动运行：
+
+```bash
+$env:RUN_LIVE_LLM_TESTS="1"
+$env:DASHSCOPE_API_KEY="***"
+python -m pytest -q tests/test_live_llm_slot_fallback.py
+```
 
 ## 代码入口说明
 

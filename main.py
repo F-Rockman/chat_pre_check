@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -10,7 +11,9 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
+from template_capability.config import load_template_config
 from template_capability.engine import TemplateCapabilityEngine
+from template_capability.fallback import OpenAICompatibleTemplateSlotResolver
 
 DEFAULT_EXAMPLES = [
     {
@@ -115,6 +118,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", default="configs/templates.json")
     parser.add_argument("--input", default="", help="Run a single input text")
     parser.add_argument("--interactive", action="store_true")
+    parser.add_argument("--llm-slot-fallback", action="store_true")
+    parser.add_argument("--llm-slot-base-url", default=os.environ.get("DASHSCOPE_BASE_URL", "https://coding.dashscope.aliyuncs.com/v1"))
+    parser.add_argument("--llm-slot-model", default=os.environ.get("DASHSCOPE_MODEL", "qwen3-coder-plus"))
+    parser.add_argument("--llm-slot-timeout", type=float, default=5.0)
     return parser.parse_args()
 
 def run_one(engine: TemplateCapabilityEngine, text: str) -> None:
@@ -135,7 +142,20 @@ def run_interactive(engine: TemplateCapabilityEngine) -> None:
 
 def main() -> None:
     args = parse_args()
-    engine = TemplateCapabilityEngine.from_file(args.config)
+    config = load_template_config(args.config)
+    resolver = None
+    if args.llm_slot_fallback:
+        api_key = os.environ.get("DASHSCOPE_API_KEY")
+        if not api_key:
+            raise SystemExit("Missing DASHSCOPE_API_KEY in environment.")
+        config.settings.llm_slot_fallback_enabled = True
+        resolver = OpenAICompatibleTemplateSlotResolver(
+            api_key=api_key,
+            base_url=args.llm_slot_base_url,
+            model=args.llm_slot_model,
+            timeout_seconds=args.llm_slot_timeout,
+        )
+    engine = TemplateCapabilityEngine(config, llm_template_slot_resolver=resolver)
     if args.interactive:
         run_interactive(engine)
         return

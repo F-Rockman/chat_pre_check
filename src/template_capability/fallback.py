@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 from urllib import request
@@ -79,6 +80,7 @@ class OpenAICompatibleTemplateSlotResolver:
         ] or [str(slot_name) for slot_name in missing_slots]
         if not target_slots:
             return None
+        start = time.perf_counter()
         payload = {
             "model": self.model,
             "temperature": 0,
@@ -105,6 +107,7 @@ class OpenAICompatibleTemplateSlotResolver:
             "response_format": {"type": "json_object"},
         }
         raw = self._post_json(payload)
+        elapsed_ms = (time.perf_counter() - start) * 1000.0
         if raw is None:
             return None
         slots_payload = raw.get("slots")
@@ -116,6 +119,7 @@ class OpenAICompatibleTemplateSlotResolver:
                 "provider": "openai_compatible",
                 "model": self.model,
                 "target_slots": target_slots,
+                "elapsed_ms": round(elapsed_ms, 2),
             },
         )
 
@@ -130,6 +134,7 @@ class OpenAICompatibleTemplateSlotResolver:
         target_slots: list[str],
     ) -> str:
         instructions = str(template.llm_slot_extraction.get("instructions", "")).strip()
+        slot_hints = self._build_slot_hints(template, target_slots)
         return (
             f"template_id: {template.template_id}\n"
             f"description: {template.description}\n"
@@ -138,12 +143,60 @@ class OpenAICompatibleTemplateSlotResolver:
             f"target_slots: {target_slots}\n"
             f"current_slots: {json.dumps(current_slots, ensure_ascii=False)}\n"
             f"missing_slots: {missing_slots}\n"
+            f"slot_hints: {json.dumps(slot_hints, ensure_ascii=False)}\n"
             f"input_text: {input_text}\n"
             f"normalized_text: {normalized_text}\n"
             f"template_instructions: {instructions or 'Only fill slots that are clearly supported by the query.'}\n"
             "Return JSON like {\"slots\": {\"slot_name\": value}}. "
             "Do not invent unsupported values. Omit unknown slots."
         )
+
+    def _build_slot_hints(
+        self,
+        template: TemplateDefinition,
+        target_slots: list[str],
+    ) -> dict[str, Any]:
+        hints: dict[str, Any] = {}
+        for slot_name in target_slots:
+            definition = template.slot_extractors.get(slot_name)
+            if definition is None:
+                continue
+            slot_hint: list[dict[str, Any]] = []
+            for extractor in definition.extractors:
+                extractor_type = str(extractor.get("type", ""))
+                if extractor_type == "keyword_value":
+                    slot_hint.append(
+                        {
+                            "type": "keyword_value",
+                            "cases": [
+                                {
+                                    "terms": list(case.get("terms", [])),
+                                    "value": case.get("value"),
+                                }
+                                for case in extractor.get("cases", [])
+                                if isinstance(case, dict)
+                            ],
+                        }
+                    )
+                elif extractor_type == "regex":
+                    slot_hint.append(
+                        {
+                            "type": "regex",
+                            "patterns": [
+                                {
+                                    "pattern": pattern.get("pattern"),
+                                    "value_type": pattern.get("value_type", "string"),
+                                    "min": pattern.get("min"),
+                                    "max": pattern.get("max"),
+                                }
+                                for pattern in extractor.get("patterns", [])
+                                if isinstance(pattern, dict)
+                            ],
+                        }
+                    )
+            if slot_hint:
+                hints[slot_name] = slot_hint
+        return hints
 
     def _post_json(self, payload: dict[str, Any]) -> dict[str, Any] | None:
         endpoint = self.base_url.rstrip("/") + "/chat/completions"
