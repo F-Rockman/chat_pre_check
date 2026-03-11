@@ -155,6 +155,10 @@ python -m pytest -q
 
 主配置文件是 [templates.json](D:/GitHub/chat_pre_check_blank/configs/templates.json)。
 
+如果你要自己新增模板，优先看单独的模板编写文档：
+
+- [template_authoring_guide.md](D:/GitHub/chat_pre_check_blank/docs/template_authoring_guide.md)
+
 顶层结构：
 
 ```json
