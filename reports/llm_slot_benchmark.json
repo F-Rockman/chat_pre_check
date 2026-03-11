@@ -1,0 +1,110 @@
+{
+  "summary": {
+    "case_count": 5,
+    "baseline_matched": 0,
+    "with_llm_matched": 5,
+    "llm_improved_cases": 5,
+    "avg_wall_ms": 1140.77,
+    "avg_llm_elapsed_ms": 1139.35,
+    "max_llm_elapsed_ms": 1409.03,
+    "within_3s_count": 5
+  },
+  "cases": [
+    {
+      "text": "近24小时接口错误包告警前十",
+      "expected_template_id": "alarm.interface.error.topn",
+      "baseline": {
+        "template_id": "alarm.interface.error.topn",
+        "status": "partial",
+        "missing_slots": [
+          "topn"
+        ],
+        "wall_ms": 0.74
+      },
+      "with_llm": {
+        "template_id": "alarm.interface.error.topn",
+        "status": "matched",
+        "missing_slots": [],
+        "wall_ms": 1107.33,
+        "llm_elapsed_ms": 1106.54
+      }
+    },
+    {
+      "text": "近7天各区域丢包率排名前五",
+      "expected_template_id": "network.packet_loss.rank.topn",
+      "baseline": {
+        "template_id": "network.packet_loss.rank.topn",
+        "status": "partial",
+        "missing_slots": [
+          "topn"
+        ],
+        "wall_ms": 1.87
+      },
+      "with_llm": {
+        "template_id": "network.packet_loss.rank.topn",
+        "status": "matched",
+        "missing_slots": [],
+        "wall_ms": 999.51,
+        "llm_elapsed_ms": 997.7
+      }
+    },
+    {
+      "text": "查询最近cpu超过八十的设备列表",
+      "expected_template_id": "device.cpu.over.list",
+      "baseline": {
+        "template_id": "device.cpu.over.list",
+        "status": "partial",
+        "missing_slots": [
+          "cpu_threshold"
+        ],
+        "wall_ms": 2.09
+      },
+      "with_llm": {
+        "template_id": "device.cpu.over.list",
+        "status": "matched",
+        "missing_slots": [],
+        "wall_ms": 1320.4,
+        "llm_elapsed_ms": 1319.07
+      }
+    },
+    {
+      "text": "查询最近内存超过七十五的设备列表",
+      "expected_template_id": "device.memory.over.list",
+      "baseline": {
+        "template_id": "device.memory.over.list",
+        "status": "partial",
+        "missing_slots": [
+          "memory_threshold"
+        ],
+        "wall_ms": 0.68
+      },
+      "with_llm": {
+        "template_id": "device.memory.over.list",
+        "status": "matched",
+        "missing_slots": [],
+        "wall_ms": 865.24,
+        "llm_elapsed_ms": 864.43
+      }
+    },
+    {
+      "text": "查询最近cpu大于八十八且内存大于六十六的设备列表",
+      "expected_template_id": "device.cpu.memory.over.list",
+      "baseline": {
+        "template_id": "device.cpu.memory.over.list",
+        "status": "partial",
+        "missing_slots": [
+          "cpu_threshold",
+          "memory_threshold"
+        ],
+        "wall_ms": 1.96
+      },
+      "with_llm": {
+        "template_id": "device.cpu.memory.over.list",
+        "status": "matched",
+        "missing_slots": [],
+        "wall_ms": 1411.38,
+        "llm_elapsed_ms": 1409.03
+      }
+    }
+  ]
+}

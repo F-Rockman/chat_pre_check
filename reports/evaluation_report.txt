@@ -1,0 +1,21 @@
+Summary
+total_cases: 75
+passed: 75
+failed: 0
+pass_rate: 100.00%
+
+Buckets
+matched: total=36 passed=36 failed=0 pass_rate=100.00%
+partial: total=16 passed=16 failed=0 pass_rate=100.00%
+unmatched: total=12 passed=12 failed=0 pass_rate=100.00%
+not_full_match: total=11 passed=11 failed=0 pass_rate=100.00%
+
+Template Coverage
+alarm.critical.count: total=8 matched=5 partial=3 failures=0
+alarm.interface.error.topn: total=10 matched=7 partial=3 failures=0
+device.cpu.memory.disk.over.list: total=4 matched=3 partial=1 failures=0
+device.cpu.memory.over.list: total=4 matched=3 partial=1 failures=0
+device.cpu.over.list: total=4 matched=3 partial=1 failures=0
+device.memory.over.list: total=4 matched=3 partial=1 failures=0
+device.offline.count: total=9 matched=6 partial=3 failures=0
+network.packet_loss.rank.topn: total=9 matched=6 partial=3 failures=0

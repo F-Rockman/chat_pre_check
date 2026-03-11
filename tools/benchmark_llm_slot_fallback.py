@@ -49,6 +49,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--base-url", default=os.environ.get("DASHSCOPE_BASE_URL", DEFAULT_BASE_URL))
     parser.add_argument("--model", default=os.environ.get("DASHSCOPE_MODEL", DEFAULT_MODEL))
     parser.add_argument("--timeout", type=float, default=5.0)
+    parser.add_argument("--output", default="")
     parser.add_argument("--json", action="store_true")
     return parser.parse_args()
 
@@ -158,6 +159,13 @@ def main() -> None:
         "within_3s_count": sum(1 for value in llm_elapsed_values if value <= 3000.0),
     }
     report = {"summary": summary, "cases": rows}
+    if args.output:
+        output_path = Path(args.output)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(
+            json.dumps(report, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2))
         return

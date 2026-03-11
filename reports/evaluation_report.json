@@ -1,0 +1,98 @@
+{
+  "summary": {
+    "total_cases": 75,
+    "passed": 75,
+    "failed": 0,
+    "pass_rate": 1.0
+  },
+  "buckets": {
+    "matched": {
+      "name": "matched",
+      "total": 36,
+      "passed": 36,
+      "failed": 0,
+      "pass_rate": 1.0
+    },
+    "partial": {
+      "name": "partial",
+      "total": 16,
+      "passed": 16,
+      "failed": 0,
+      "pass_rate": 1.0
+    },
+    "unmatched": {
+      "name": "unmatched",
+      "total": 12,
+      "passed": 12,
+      "failed": 0,
+      "pass_rate": 1.0
+    },
+    "not_full_match": {
+      "name": "not_full_match",
+      "total": 11,
+      "passed": 11,
+      "failed": 0,
+      "pass_rate": 1.0
+    }
+  },
+  "template_coverage": {
+    "alarm.interface.error.topn": {
+      "template_id": "alarm.interface.error.topn",
+      "matched_cases": 7,
+      "partial_cases": 3,
+      "total_cases": 10,
+      "failures": 0
+    },
+    "device.offline.count": {
+      "template_id": "device.offline.count",
+      "matched_cases": 6,
+      "partial_cases": 3,
+      "total_cases": 9,
+      "failures": 0
+    },
+    "network.packet_loss.rank.topn": {
+      "template_id": "network.packet_loss.rank.topn",
+      "matched_cases": 6,
+      "partial_cases": 3,
+      "total_cases": 9,
+      "failures": 0
+    },
+    "alarm.critical.count": {
+      "template_id": "alarm.critical.count",
+      "matched_cases": 5,
+      "partial_cases": 3,
+      "total_cases": 8,
+      "failures": 0
+    },
+    "device.cpu.over.list": {
+      "template_id": "device.cpu.over.list",
+      "matched_cases": 3,
+      "partial_cases": 1,
+      "total_cases": 4,
+      "failures": 0
+    },
+    "device.memory.over.list": {
+      "template_id": "device.memory.over.list",
+      "matched_cases": 3,
+      "partial_cases": 1,
+      "total_cases": 4,
+      "failures": 0
+    },
+    "device.cpu.memory.over.list": {
+      "template_id": "device.cpu.memory.over.list",
+      "matched_cases": 3,
+      "partial_cases": 1,
+      "total_cases": 4,
+      "failures": 0
+    },
+    "device.cpu.memory.disk.over.list": {
+      "template_id": "device.cpu.memory.disk.over.list",
+      "matched_cases": 3,
+      "partial_cases": 1,
+      "total_cases": 4,
+      "failures": 0
+    }
+  },
+  "templates_without_cases": [],
+  "failures": []
+}
