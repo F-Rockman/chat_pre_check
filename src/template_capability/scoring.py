@@ -32,6 +32,7 @@ def mixed_terms(text: str) -> list[str]:
 
 
 def sample_similarity_score(text: str, utterances: list[str]) -> float:
+    """兼容旧调用方的便捷入口。"""
     if not utterances:
         return 0.0
     query_terms = set(mixed_terms(text))
@@ -39,10 +40,12 @@ def sample_similarity_score(text: str, utterances: list[str]) -> float:
 
 
 def build_utterance_term_sets(utterances: list[str]) -> list[set[str]]:
+    """提前把模板示例问法切词，避免每次匹配都重复处理。"""
     return [set(mixed_terms(utterance)) for utterance in utterances if utterance]
 
 
 def sample_similarity_from_terms(query_terms: set[str], utterance_term_sets: list[set[str]]) -> float:
+    """用 Dice 风格的重叠率衡量 query 和示例问法的接近程度。"""
     if not query_terms:
         return 0.0
     best = 0.0
@@ -190,6 +193,7 @@ class BM25FieldIndex:
 
 
 def normalize_candidate_scores(items: list[tuple[str, float]]) -> dict[str, float]:
+    """把不同召回路的原始分压到 0-1，方便后续融合。"""
     if not items:
         return {}
     top_score = max(score for _, score in items)
@@ -203,6 +207,7 @@ def reciprocal_rank_fusion(
     *,
     rrf_k: int = 60,
 ) -> dict[str, float]:
+    """RRF 只看 rank，不依赖各路原始分是否同尺度。"""
     fused: dict[str, float] = {}
     for ranking in rankings:
         for rank, (doc_id, _) in enumerate(ranking, start=1):
@@ -216,6 +221,7 @@ def reciprocal_rank_fusion(
 
 
 def slot_fit_score(template: TemplateDefinition, slots: dict[str, Any]) -> float:
+    """衡量当前模板需要的槽位被填得有多完整。"""
     required = template.required_slots
     optional = template.optional_slots
     if not required and not optional:
@@ -231,6 +237,10 @@ def structural_alignment_score(
     template: TemplateDefinition,
     slots: dict[str, Any],
 ) -> float:
+    """衡量“抽出来的条件”和“模板能表达的条件”是否同构。
+
+    这里既惩罚 query 里多出的条件，也惩罚模板要求但 query 没给全的关键过滤条件。
+    """
     extracted_slots = {
         slot_name
         for slot_name, value in slots.items()
@@ -251,6 +261,7 @@ def structural_alignment_score(
     unexpected_weight = sum(_slot_signal_weight(slot_name) for slot_name in unexpected_slots)
     coverage_score = 1.0 - unexpected_weight / max(1.0, total_weight)
 
+    # 没有过滤条件时，不再强求更复杂的结构完整度。
     extracted_filter_slots = {slot_name for slot_name in extracted_slots if _is_filter_slot(slot_name)}
     if not extracted_filter_slots:
         return clamp_score(coverage_score)
@@ -290,6 +301,7 @@ def constraint_score(
     text: str,
     slots: dict[str, Any],
 ) -> float:
+    """计算模板自身显式约束是否满足。"""
     lowered = text.lower()
     if has_negative_term(template, lowered):
         return 0.0
@@ -317,11 +329,13 @@ def constraint_score(
 
 
 def has_negative_term(template: TemplateDefinition, text: str) -> bool:
+    """只要命中模板负向词，就视为该模板不该匹配。"""
     lowered = text.lower()
     return any(term.lower() in lowered for term in template.negative_terms)
 
 
 def weighted_score(parts: dict[str, float], weights: dict[str, float]) -> float:
+    """把各子分按权重线性融合。"""
     total = 0.0
     for name, weight in weights.items():
         total += clamp_score(parts.get(name, 0.0)) * weight
@@ -332,6 +346,11 @@ def adaptive_score_weights(
     base_weights: dict[str, float],
     slots: dict[str, Any],
 ) -> dict[str, float]:
+    """根据 query 复杂度动态调权。
+
+    过滤条件越多，越要提高结构分和槽位覆盖度的重要性，
+    否则多条件 query 很容易被单条件模板抢走。
+    """
     weights = {name: float(value) for name, value in base_weights.items()}
     filter_slot_count = sum(1 for slot_name, value in slots.items() if value not in (None, "") and _is_filter_slot(slot_name))
     complexity = min(1.0, filter_slot_count / 3.0)
@@ -353,12 +372,14 @@ def adaptive_score_weights(
 
 
 def clamp_score(score: float) -> float:
+    """统一把分数限制在 0-1。"""
     if math.isnan(score):
         return 0.0
     return max(0.0, min(1.0, score))
 
 
 def missing_required_slots(template: TemplateDefinition, slots: dict[str, Any]) -> list[str]:
+    """列出当前模板还缺哪些必填槽位。"""
     return [
         slot_name
         for slot_name in template.required_slots
@@ -367,6 +388,7 @@ def missing_required_slots(template: TemplateDefinition, slots: dict[str, Any]) 
 
 
 def _coverage_score(slot_names: list[str], slots: dict[str, Any]) -> float:
+    """简单覆盖率，用于 required/optional 的命中统计。"""
     if not slot_names:
         return 1.0
     hit = sum(1 for slot_name in slot_names if slots.get(slot_name) not in (None, ""))
@@ -384,6 +406,7 @@ def _char_ngrams(text: str, size: int) -> list[str]:
 
 
 def _matches_allowed_values(extracted: Any, allowed_values: list[Any]) -> bool:
+    """支持标量和字典槽位的宽松值比较。"""
     extracted_candidates = _flatten_value(extracted)
     for allowed in allowed_values:
         allowed_candidates = _flatten_value(allowed)
@@ -405,6 +428,7 @@ def _flatten_value(value: Any) -> set[str]:
 
 
 def _slot_signal_weight(slot_name: str) -> float:
+    """不同槽位对结构判断的价值不同。"""
     if slot_name in LOW_SIGNAL_SLOTS:
         return 0.5
     if slot_name.endswith("_threshold"):
@@ -419,6 +443,7 @@ def _is_filter_slot(slot_name: str) -> bool:
 
 
 def _normalize_weights(weights: dict[str, float]) -> dict[str, float]:
+    """把任意权重字典重新归一化。"""
     total = sum(max(0.0, value) for value in weights.values())
     if total <= 0:
         return weights

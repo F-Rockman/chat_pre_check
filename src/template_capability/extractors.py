@@ -20,6 +20,7 @@ def normalize_text(text: str) -> str:
 
 
 class SlotValueExtractor(Protocol):
+    """所有 extractor 的统一接口。"""
     def extract(self, text: str) -> Any | None:
         ...
 
@@ -29,6 +30,7 @@ class KeywordValueExtractor:
     cases: list[dict[str, Any]]
 
     def extract(self, text: str) -> Any | None:
+        """命中任一关键词组就返回预定义值。"""
         for case in self.cases:
             terms = [normalize_text(str(term)) for term in case.get("terms", [])]
             if not terms:
@@ -47,6 +49,7 @@ class RegexValueExtractor:
     )
 
     def __post_init__(self) -> None:
+        # 提前编译 regex，避免每次提参时重复编译模式。
         self._compiled_patterns = [
             (
                 re.compile(str(spec["pattern"]), re.IGNORECASE),
@@ -61,6 +64,7 @@ class RegexValueExtractor:
         ]
 
     def extract(self, text: str) -> Any | None:
+        """按顺序尝试 regex，首个成功命中的规则直接返回。"""
         for pattern, group, value_type, min_value, max_value, fixed_value in self._compiled_patterns:
             match = pattern.search(text)
             if not match:
@@ -83,6 +87,7 @@ class RegexValueExtractor:
 def build_slot_registry(
     definitions: dict[str, SlotExtractorDefinition],
 ) -> "SlotExtractorRegistry":
+    """把配置字典实例化成真正可执行的 extractor 注册表。"""
     extractors: dict[str, list[SlotValueExtractor]] = {}
     for slot_name, definition in definitions.items():
         slot_extractors: list[SlotValueExtractor] = []
@@ -108,6 +113,7 @@ class SlotExtractorRegistry:
     extractors: dict[str, list[SlotValueExtractor]]
 
     def extract(self, text: str) -> dict[str, Any]:
+        """对每个槽位只保留第一个成功提取的值。"""
         slots: dict[str, Any] = {}
         for slot_name, slot_extractors in self.extractors.items():
             for extractor in slot_extractors:
@@ -119,6 +125,7 @@ class SlotExtractorRegistry:
 
 
 def _cast_value(raw_value: str, value_type: str) -> Any | None:
+    """把 regex 命中的文本转成配置声明的值类型。"""
     try:
         if value_type == "int":
             return int(raw_value)

@@ -12,6 +12,7 @@ from template_capability.models import MatchStatus, TemplateCandidate, TemplateD
 
 @dataclass(slots=True)
 class FallbackSuggestion:
+    """模板选择 fallback 的统一返回结构。"""
     template_id: str | int
     status: MatchStatus
     score: float
@@ -24,6 +25,7 @@ class FallbackSuggestion:
 
 @dataclass(slots=True)
 class SlotFallbackSuggestion:
+    """模板级 LLM 补参的统一返回结构。"""
     slots: dict[str, Any] = field(default_factory=dict)
     trace: dict[str, Any] = field(default_factory=dict)
 
@@ -59,6 +61,7 @@ _JSON_BLOCK_RE = re.compile(r"\{.*\}", re.DOTALL)
 
 @dataclass(slots=True)
 class OpenAICompatibleTemplateSlotResolver:
+    """面向 OpenAI 兼容协议的模板级补参实现。"""
     api_key: str
     base_url: str
     model: str
@@ -73,6 +76,7 @@ class OpenAICompatibleTemplateSlotResolver:
         current_slots: dict[str, Any],
         missing_slots: list[str],
     ) -> SlotFallbackSuggestion | None:
+        """只为目标模板缺失的少量槽位发起一次补参请求。"""
         target_slots = [
             str(slot_name)
             for slot_name in template.llm_slot_extraction.get("slots", missing_slots)
@@ -133,6 +137,7 @@ class OpenAICompatibleTemplateSlotResolver:
         missing_slots: list[str],
         target_slots: list[str],
     ) -> str:
+        """把模板配置和当前缺失槽位收束成一个非常窄的提参任务。"""
         instructions = str(template.llm_slot_extraction.get("instructions", "")).strip()
         slot_hints = self._build_slot_hints(template, target_slots)
         return (
@@ -156,6 +161,7 @@ class OpenAICompatibleTemplateSlotResolver:
         template: TemplateDefinition,
         target_slots: list[str],
     ) -> dict[str, Any]:
+        """把模板本地 extractor 转成 LLM 能读懂的提示，减少胡编参数。"""
         hints: dict[str, Any] = {}
         for slot_name in target_slots:
             definition = template.slot_extractors.get(slot_name)
@@ -199,6 +205,7 @@ class OpenAICompatibleTemplateSlotResolver:
         return hints
 
     def _post_json(self, payload: dict[str, Any]) -> dict[str, Any] | None:
+        """最小化的 HTTP 调用层，只负责拿到 JSON 响应。"""
         endpoint = self.base_url.rstrip("/") + "/chat/completions"
         req = request.Request(
             endpoint,
@@ -237,6 +244,7 @@ class OpenAICompatibleTemplateSlotResolver:
         try:
             return json.loads(content)
         except json.JSONDecodeError:
+            # 某些兼容实现会在 JSON 前后包一层解释文本，这里做一次兜底提取。
             match = _JSON_BLOCK_RE.search(content)
             if match is None:
                 return None

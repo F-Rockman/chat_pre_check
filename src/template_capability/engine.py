@@ -39,7 +39,12 @@ from template_capability.vector_index import (
 
 
 class TemplateCapabilityEngine:
-    """面向问数场景的通用模板匹配能力。"""
+    """面向问数场景的通用模板匹配能力。
+
+    主链路分两段：
+    1. 先只基于 query 文本做模板召回和粗排。
+    2. 对候选模板分别按“模板自己的 extractor”抽参，再做精排和可选补参。
+    """
 
     def __init__(
         self,
@@ -53,10 +58,13 @@ class TemplateCapabilityEngine:
         self.llm_template_slot_resolver = llm_template_slot_resolver
         self.slot_registry = build_slot_registry(config.slot_extractors)
         self.templates = {template.template_id: template for template in config.templates}
+        # 每个模板都维护一套独立的槽位抽取器。这样模板之间可以复用槽位名，
+        # 但不需要共享完全一致的提参逻辑。
         self.template_slot_registries = {
             template.template_id: build_slot_registry(self._build_template_slot_definitions(template))
             for template in config.templates
         }
+        # 下面这些结构都是预计算索引，避免在线匹配时重复处理模板文本。
         self.template_documents = {
             template.template_id: self._build_template_document(template)
             for template in config.templates
@@ -83,6 +91,10 @@ class TemplateCapabilityEngine:
         return cls(load_template_config(path))
 
     def match(self, input_text: str) -> MatchResult:
+        """执行一次完整匹配。
+
+        返回时只暴露一个最终模板；如果分数不够或歧义太高，则直接返回 `-1`。
+        """
         norm_text = normalize_text(input_text)
         shared_slots = self.slot_registry.extract(norm_text)
         blocked_term = self._match_blocked_term(norm_text)
@@ -138,12 +150,15 @@ class TemplateCapabilityEngine:
         slots = dict(top.slots)
         missing_slots = missing_required_slots(template, slots)
         status = MatchStatus.MATCHED if not missing_slots else MatchStatus.PARTIAL
+        # 模板已经稳定命中后，才允许用更贵的 LLM 做定向补参。
         top = self._resolve_template_slots_with_fallback(
             input_text=input_text,
             norm_text=norm_text,
             candidate=top,
             status=status,
         )
+        # 如果 top1 因为补参而发生变化，需要让 trace 里的 top_candidates
+        # 也反映补参后的最新 top1，而不是旧版本。
         display_candidates = [top] + [
             candidate
             for candidate in ranked
@@ -186,6 +201,7 @@ class TemplateCapabilityEngine:
         self,
         norm_text: str,
     ) -> list[TemplateCandidate]:
+        """先召回候选模板，再按模板内抽参结果做精排。"""
         query_term_set = set(mixed_terms(norm_text))
         lexical_recall = self.lexical_index.search(norm_text, self.config.settings.recall_top_k)
         vector_recall = self.vector_backend.search(norm_text, self.config.settings.recall_top_k)
@@ -198,10 +214,12 @@ class TemplateCapabilityEngine:
             [lexical_recall, vector_recall, sample_recall],
             rrf_k=self.config.settings.fusion_rrf_k,
         )
+        # 候选池取三路召回和融合排序的并集，避免任何单一路召回把好模板漏掉。
         candidate_ids = set(lexical_scores) | set(vector_scores) | set(sample_scores) | set(fusion_scores)
         ranked: list[TemplateCandidate] = []
 
         for template_id in candidate_ids:
+            # 进入精排后才按模板自己的规则提参。
             slots = self.extract_slots(template_id, norm_text)
             rerank_weights = adaptive_score_weights(self.config.settings.weights, slots)
             ranked.append(
@@ -221,11 +239,13 @@ class TemplateCapabilityEngine:
         return ranked
 
     def _build_template_document(self, template: TemplateDefinition) -> str:
+        """生成向量召回使用的模板文档。"""
         parts = [template.description, *template.utterances]
         parts.extend(" ".join(group) for group in template.must_terms)
         return normalize_text(" ".join(part for part in parts if part))
 
     def _build_template_fields(self, template: TemplateDefinition) -> dict[str, list[str]]:
+        """生成 BM25F 的多字段文本。"""
         must_terms_text = " ".join(" ".join(group) for group in template.must_terms)
         return {
             "description": mixed_terms(normalize_text(template.description)),
@@ -234,6 +254,7 @@ class TemplateCapabilityEngine:
         }
 
     def _sample_recall(self, query_term_set: set[str]) -> list[tuple[str, float]]:
+        """用示例问法相似度做一条廉价召回路。"""
         scored = [
             (
                 template_id,
@@ -245,12 +266,19 @@ class TemplateCapabilityEngine:
         return scored[: self.config.settings.recall_top_k]
 
     def extract_slots(self, template_id: str, text: str) -> dict[str, object]:
+        """按模板自己的 extractor 抽槽位。"""
         return self.template_slot_registries[template_id].extract(text)
 
     def _build_template_slot_definitions(
         self,
         template: TemplateDefinition,
     ) -> dict[str, SlotExtractorDefinition]:
+        """组装模板可见的槽位定义。
+
+        优先级是：
+        1. 模板本地 `slot_extractors`
+        2. 根级共享 `slot_extractors`
+        """
         relevant_slots = (
             set(template.required_slots)
             | set(template.optional_slots)
@@ -287,6 +315,7 @@ class TemplateCapabilityEngine:
         slots: dict[str, object],
         weights: dict[str, float],
     ) -> TemplateCandidate:
+        """把一个模板在当前 query 下的所有子分数组装成最终候选。"""
         template = self.templates[template_id]
         slot_score = slot_fit_score(template, slots)
         constraint = constraint_score(template, norm_text, slots)
@@ -328,6 +357,7 @@ class TemplateCapabilityEngine:
         top: TemplateCandidate,
         second: TemplateCandidate | None,
     ) -> bool:
+        """top1 和 top2 都够高，但差距不够时视为歧义。"""
         if second is None:
             return False
         if second.score < self.config.settings.match_threshold:
@@ -335,6 +365,7 @@ class TemplateCapabilityEngine:
         return (top.score - second.score) < self.config.settings.ambiguity_margin
 
     def _match_blocked_term(self, norm_text: str) -> str | None:
+        """全局拦截明显非问数意图。"""
         for term in self.config.settings.blocked_terms:
             lowered = term.lower()
             if lowered and lowered in norm_text:
@@ -349,6 +380,7 @@ class TemplateCapabilityEngine:
         candidate: TemplateCandidate,
         status: MatchStatus,
     ) -> TemplateCandidate:
+        """只对已稳定命中的 top1 模板尝试模板级 LLM 补参。"""
         template = self.templates[candidate.template_id]
         missing_slots = missing_required_slots(template, candidate.slots)
         if not self._should_use_template_slot_fallback(candidate, missing_slots, status):
@@ -364,6 +396,7 @@ class TemplateCapabilityEngine:
         )
         if suggestion is None or not suggestion.slots:
             return candidate
+        # LLM 只补充缺失值，不覆盖已有槽位的业务判断结果。
         merged_slots = dict(candidate.slots)
         merged_slots.update(suggestion.slots)
         rerank_weights = adaptive_score_weights(self.config.settings.weights, merged_slots)
@@ -404,6 +437,7 @@ class TemplateCapabilityEngine:
         missing_slots: list[str],
         status: MatchStatus,
     ) -> bool:
+        """模板级 LLM 补参的触发门槛。"""
         if not self.config.settings.llm_slot_fallback_enabled:
             return False
         template = self.templates[candidate.template_id]
@@ -431,6 +465,7 @@ class TemplateCapabilityEngine:
         missing_slots: list[str],
         base_status: MatchStatus,
     ) -> MatchResult | None:
+        """旧的模板选择级 fallback，作用范围比模板级补参更大。"""
         if not self._should_use_fallback(ranked, missing_slots, base_status):
             return None
         if self.llm_fallback_resolver is None:
@@ -452,6 +487,7 @@ class TemplateCapabilityEngine:
         missing_slots: list[str],
         base_status: MatchStatus,
     ) -> bool:
+        """只有在低置信边界 case 上才放行模板选择 fallback。"""
         if not self.config.settings.llm_fallback_enabled:
             return False
         top = ranked[0] if ranked else None
@@ -468,6 +504,7 @@ class TemplateCapabilityEngine:
         ranked: list[TemplateCandidate],
         suggestion: FallbackSuggestion,
     ) -> MatchResult:
+        """把模板选择 fallback 的结果转成统一输出。"""
         return MatchResult(
             template_id=suggestion.template_id,
             status=suggestion.status,
