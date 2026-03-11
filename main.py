@@ -110,7 +110,6 @@ DEFAULT_EXAMPLES = [
     },
 ]
 
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generic metric-query template matcher")
     parser.add_argument("--config", default="configs/templates.json")
@@ -118,13 +117,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--interactive", action="store_true")
     return parser.parse_args()
 
-
 def run_one(engine: TemplateCapabilityEngine, text: str) -> None:
     payload = engine.match(text).to_dict()
     print("=" * 80)
     print(f"INPUT      : {text}")
     print(json.dumps(payload, ensure_ascii=False, indent=2))
-
 
 def run_interactive(engine: TemplateCapabilityEngine) -> None:
     print("Interactive mode. 输入 exit 退出。")
@@ -135,7 +132,6 @@ def run_interactive(engine: TemplateCapabilityEngine) -> None:
         if text.lower() in {"exit", "quit", "q"}:
             break
         run_one(engine, text)
-
 
 def main() -> None:
     args = parse_args()
