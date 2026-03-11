@@ -34,9 +34,10 @@
 
 1. `normalize_text`：文本标准化
 2. `slot_registry.extract`：配置驱动槽位抽取
-3. `BM25F` + `char ngram` + `vector search`：候选召回与相似度打分
-4. `slot_fit` + `constraint` + `structure_score`：模板约束和结构校验
-5. 阈值和歧义判断：输出 `matched / partial / unmatched`
+3. `BM25F` + `char ngram` + `vector search`：多路候选召回
+4. `RRF` + 动态权重重排：融合多路召回，按 query 复杂度调权
+5. `slot_fit` + `constraint` + `structure_score`：模板约束和结构校验
+6. 阈值和歧义判断：输出 `matched / partial / unmatched`
 
 设计原则：
 
@@ -161,7 +162,9 @@ python -m pytest -q
 - `match_threshold`：命中阈值
 - `ambiguity_margin`：top1 和 top2 过近时返回 `-1`
 - `recall_top_k`：召回候选数
-- `weights`：`lexical / vector / slot_fit / constraint` 融合权重
+- `weights`：`lexical / sample / vector / fusion / slot_fit / constraint / structure` 重排权重
+- `lexical_field_weights`：`description / utterances / must_terms` 的 BM25F 字段权重
+- `fusion_rrf_k`：RRF 倒数排序融合参数
 - `vector.dimension`：向量维度，当前按 `512` 设计
 - `blocked_terms`：全局拦截词，命中后直接 `unmatched`
 - `llm_fallback`：可选兜底开关，默认关闭
@@ -291,14 +294,23 @@ python -m pytest -q
 1. `BM25F` 多字段词法召回
 2. `char ngram` 样本相似度
 3. `vector search` 向量召回
-4. `slot_fit_score` 槽位覆盖度
-5. `constraint_score` 模板约束得分
-6. `structure_score` 结构一致性得分
+4. `RRF` 融合多路召回排名
+5. 动态权重重排
+6. `slot_fit_score` 槽位覆盖度
+7. `constraint_score` 模板约束得分
+8. `structure_score` 结构一致性得分
 
 最终分数：
 
 ```text
-total_score = lexical * w1 + vector * w2 + slot_fit * w3 + constraint * w4 + structure * w5
+total_score =
+  lexical * w1
+  + sample * w2
+  + vector * w3
+  + fusion * w4
+  + slot_fit * w5
+  + constraint * w6
+  + structure * w7
 ```
 
 为什么这样设计：
@@ -306,9 +318,12 @@ total_score = lexical * w1 + vector * w2 + slot_fit * w3 + constraint * w4 + str
 - `BM25F` 比单文本 BM25 更适合模板多字段匹配
 - `char ngram` 对中文短句、语序变化、口语化更稳
 - `vector search` 处理更弱的表达改写
+- `RRF` 能把多路召回的优势合并起来，减少单路偏置
+- 动态权重会在多条件 query 上自动提高 `structure` 和 `slot_fit` 权重
 - `slot_fit` 保证模板参数完整性
 - `constraint` 防止“看起来像，但其实不是这个模板”
-- `structure_score` 会惩罚 query 里多出的模板无法消费的条件
+- `structure_score` 会同时惩罚两类问题：
+  query 里多出的条件模板接不住；模板要求的关键过滤条件 query 没给全
 
 ## 向量接口接入
 
@@ -378,8 +393,11 @@ class VectorSearchBackend(Protocol):
 
 - `match_threshold`
 - `ambiguity_margin`
-- `weights.lexical`
+- `weights.structure`
 - `weights.slot_fit`
+- `weights.lexical`
+- `weights.fusion`
+- `lexical_field_weights.must_terms`
 - `must_terms`
 - `slot_constraints`
 

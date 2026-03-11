@@ -18,6 +18,16 @@ def test_match_device_cpu_over_list_template():
     assert payload["template_id"] == "device.cpu.over.list"
     assert payload["status"] == "matched"
     assert payload["slots"]["cpu_threshold"] == 80.0
+    assert "sample_score" in payload["trace"]["selected_template"]
+    assert "fusion_score" in payload["trace"]["selected_template"]
+
+
+def test_single_condition_query_prefers_single_condition_template():
+    payload = build_engine().match("查询最近cpu大于80的设备列表").to_dict()
+    top_candidates = payload["trace"]["top_candidates"]
+    assert top_candidates[0]["template_id"] == "device.cpu.over.list"
+    assert top_candidates[0]["score"] > top_candidates[1]["score"]
+    assert top_candidates[0]["structure_score"] > top_candidates[1]["structure_score"]
 
 
 def test_match_device_cpu_memory_over_list_template():
@@ -28,6 +38,7 @@ def test_match_device_cpu_memory_over_list_template():
     assert payload["slots"]["memory_threshold"] == 70.0
     assert payload["trace"]["top_candidates"][0]["template_id"] == "device.cpu.memory.over.list"
     assert payload["trace"]["top_candidates"][0]["score"] > payload["trace"]["top_candidates"][1]["score"]
+    assert payload["trace"]["top_candidates"][0]["structure_score"] > payload["trace"]["top_candidates"][1]["structure_score"]
 
 
 def test_match_device_cpu_memory_disk_over_list_template():

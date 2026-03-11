@@ -35,11 +35,18 @@ def sample_similarity_score(text: str, utterances: list[str]) -> float:
     if not utterances:
         return 0.0
     query_terms = set(mixed_terms(text))
+    return sample_similarity_from_terms(query_terms, build_utterance_term_sets(utterances))
+
+
+def build_utterance_term_sets(utterances: list[str]) -> list[set[str]]:
+    return [set(mixed_terms(utterance)) for utterance in utterances if utterance]
+
+
+def sample_similarity_from_terms(query_terms: set[str], utterance_term_sets: list[set[str]]) -> float:
     if not query_terms:
         return 0.0
     best = 0.0
-    for utterance in utterances:
-        utterance_terms = set(mixed_terms(utterance))
+    for utterance_terms in utterance_term_sets:
         overlap = len(query_terms & utterance_terms)
         total = len(query_terms) + len(utterance_terms)
         if total == 0:
@@ -191,6 +198,23 @@ def normalize_candidate_scores(items: list[tuple[str, float]]) -> dict[str, floa
     return {doc_id: clamp_score(score / top_score) for doc_id, score in items}
 
 
+def reciprocal_rank_fusion(
+    rankings: list[list[tuple[str, float]]],
+    *,
+    rrf_k: int = 60,
+) -> dict[str, float]:
+    fused: dict[str, float] = {}
+    for ranking in rankings:
+        for rank, (doc_id, _) in enumerate(ranking, start=1):
+            fused[doc_id] = fused.get(doc_id, 0.0) + 1.0 / (rrf_k + rank)
+    if not fused:
+        return {}
+    top_score = max(fused.values())
+    if top_score <= 0:
+        return {doc_id: 0.0 for doc_id in fused}
+    return {doc_id: clamp_score(score / top_score) for doc_id, score in fused.items()}
+
+
 def slot_fit_score(template: TemplateDefinition, slots: dict[str, Any]) -> float:
     required = template.required_slots
     optional = template.optional_slots
@@ -239,7 +263,26 @@ def structural_alignment_score(
     )
     filter_total_weight = sum(_slot_signal_weight(slot_name) for slot_name in extracted_filter_slots)
     filter_score = matched_filter_weight / max(1.0, filter_total_weight)
-    return clamp_score(0.55 * coverage_score + 0.45 * filter_score)
+    required_filter_slots = {
+        slot_name
+        for slot_name in template.required_slots
+        if _is_filter_slot(slot_name)
+    }
+    if not required_filter_slots:
+        return clamp_score(0.55 * coverage_score + 0.45 * filter_score)
+
+    required_filter_weight = sum(_slot_signal_weight(slot_name) for slot_name in required_filter_slots)
+    matched_required_filter_weight = sum(
+        _slot_signal_weight(slot_name)
+        for slot_name in required_filter_slots
+        if slot_name in extracted_filter_slots
+    )
+    completeness_score = matched_required_filter_weight / max(1.0, required_filter_weight)
+    return clamp_score(
+        0.45 * coverage_score
+        + 0.3 * filter_score
+        + 0.25 * completeness_score
+    )
 
 
 def constraint_score(
@@ -283,6 +326,30 @@ def weighted_score(parts: dict[str, float], weights: dict[str, float]) -> float:
     for name, weight in weights.items():
         total += clamp_score(parts.get(name, 0.0)) * weight
     return clamp_score(total)
+
+
+def adaptive_score_weights(
+    base_weights: dict[str, float],
+    slots: dict[str, Any],
+) -> dict[str, float]:
+    weights = {name: float(value) for name, value in base_weights.items()}
+    filter_slot_count = sum(1 for slot_name, value in slots.items() if value not in (None, "") and _is_filter_slot(slot_name))
+    complexity = min(1.0, filter_slot_count / 3.0)
+    if complexity <= 0:
+        return _normalize_weights(weights)
+
+    for key in ("lexical", "sample", "vector"):
+        if key in weights:
+            weights[key] *= 1.0 - (0.15 + (0.05 if key == "vector" else 0.0)) * complexity
+    if "slot_fit" in weights:
+        weights["slot_fit"] *= 1.0 + 0.2 * complexity
+    if "structure" in weights:
+        weights["structure"] *= 1.0 + 0.45 * complexity
+    if "constraint" in weights:
+        weights["constraint"] *= 1.0 + 0.1 * complexity
+    if "fusion" in weights:
+        weights["fusion"] *= 1.0 + 0.1 * complexity
+    return _normalize_weights(weights)
 
 
 def clamp_score(score: float) -> float:
@@ -349,3 +416,10 @@ def _slot_signal_weight(slot_name: str) -> float:
 
 def _is_filter_slot(slot_name: str) -> bool:
     return slot_name.endswith("_threshold") or slot_name in FILTER_SLOTS
+
+
+def _normalize_weights(weights: dict[str, float]) -> dict[str, float]:
+    total = sum(max(0.0, value) for value in weights.values())
+    if total <= 0:
+        return weights
+    return {name: max(0.0, value) / total for name, value in weights.items()}

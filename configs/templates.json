@@ -4,12 +4,15 @@
     "ambiguity_margin": 0.03,
     "recall_top_k": 30,
     "weights": {
-      "lexical": 0.35,
+      "lexical": 0.2,
+      "sample": 0.1,
       "vector": 0.15,
-      "slot_fit": 0.2,
+      "fusion": 0.1,
+      "slot_fit": 0.15,
       "constraint": 0.1,
       "structure": 0.2
     },
+    "fusion_rrf_k": 60,
     "lexical_field_weights": {
       "description": 0.6,
       "utterances": 1.0,

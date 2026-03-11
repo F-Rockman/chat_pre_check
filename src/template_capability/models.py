@@ -5,6 +5,23 @@ from enum import Enum
 from typing import Any
 
 
+DEFAULT_SCORE_WEIGHTS: dict[str, float] = {
+    "lexical": 0.2,
+    "sample": 0.1,
+    "vector": 0.15,
+    "fusion": 0.1,
+    "slot_fit": 0.15,
+    "constraint": 0.1,
+    "structure": 0.2,
+}
+
+DEFAULT_LEXICAL_FIELD_WEIGHTS: dict[str, float] = {
+    "description": 0.6,
+    "utterances": 1.0,
+    "must_terms": 1.6,
+}
+
+
 class MatchStatus(str, Enum):
     """模板匹配只区分命中、部分命中、未命中。"""
 
@@ -22,12 +39,19 @@ class MatcherSettings:
     recall_top_k: int
     weights: dict[str, float]
     lexical_field_weights: dict[str, float] = field(default_factory=dict)
+    fusion_rrf_k: int = 60
     vector_dimension: int = 512
     blocked_terms: list[str] = field(default_factory=list)
     llm_fallback_enabled: bool = False
     llm_fallback_max_candidates: int = 3
     llm_fallback_score_margin: float = 0.08
     llm_fallback_max_missing_slots: int = 2
+
+    def __post_init__(self) -> None:
+        if not self.weights:
+            self.weights = dict(DEFAULT_SCORE_WEIGHTS)
+        if not self.lexical_field_weights:
+            self.lexical_field_weights = dict(DEFAULT_LEXICAL_FIELD_WEIGHTS)
 
 
 @dataclass(slots=True)
@@ -62,7 +86,9 @@ class TemplateCandidate:
     query_mode: str
     score: float
     lexical_score: float
+    sample_score: float
     vector_score: float
+    fusion_score: float
     slot_fit_score: float
     constraint_score: float
     structure_score: float
@@ -75,7 +101,9 @@ class TemplateCandidate:
             "query_mode": self.query_mode,
             "score": self.score,
             "lexical_score": self.lexical_score,
+            "sample_score": self.sample_score,
             "vector_score": self.vector_score,
+            "fusion_score": self.fusion_score,
             "slot_fit_score": self.slot_fit_score,
             "constraint_score": self.constraint_score,
             "structure_score": self.structure_score,

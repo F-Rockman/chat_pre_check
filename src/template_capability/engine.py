@@ -6,12 +6,15 @@ from template_capability.fallback import FallbackSuggestion, LLMFallbackResolver
 from template_capability.models import MatchResult, MatchStatus, TemplateCandidate, TemplateDefinition
 from template_capability.scoring import (
     BM25FieldIndex,
+    adaptive_score_weights,
+    build_utterance_term_sets,
     constraint_score,
     has_negative_term,
     missing_required_slots,
     mixed_terms,
     normalize_candidate_scores,
-    sample_similarity_score,
+    reciprocal_rank_fusion,
+    sample_similarity_from_terms,
     slot_fit_score,
     structural_alignment_score,
     weighted_score,
@@ -42,6 +45,10 @@ class TemplateCapabilityEngine:
         }
         self.template_lexical_fields = {
             template.template_id: self._build_template_fields(template)
+            for template in config.templates
+        }
+        self.template_sample_terms = {
+            template.template_id: build_utterance_term_sets(template.utterances)
             for template in config.templates
         }
         self.lexical_index = BM25FieldIndex(
@@ -147,21 +154,28 @@ class TemplateCapabilityEngine:
         norm_text: str,
         slots: dict[str, object],
     ) -> list[TemplateCandidate]:
+        query_term_set = set(mixed_terms(norm_text))
         lexical_recall = self.lexical_index.search(norm_text, self.config.settings.recall_top_k)
         vector_recall = self.vector_backend.search(norm_text, self.config.settings.recall_top_k)
+        sample_recall = self._sample_recall(query_term_set)
 
         lexical_scores = normalize_candidate_scores(lexical_recall)
         vector_scores = normalize_candidate_scores(vector_recall)
-        candidate_ids = set(lexical_scores) | set(vector_scores)
+        sample_scores = normalize_candidate_scores(sample_recall)
+        fusion_scores = reciprocal_rank_fusion(
+            [lexical_recall, vector_recall, sample_recall],
+            rrf_k=self.config.settings.fusion_rrf_k,
+        )
+        rerank_weights = adaptive_score_weights(self.config.settings.weights, slots)
+        candidate_ids = set(lexical_scores) | set(vector_scores) | set(sample_scores) | set(fusion_scores)
         ranked: list[TemplateCandidate] = []
 
         for template_id in candidate_ids:
             template = self.templates[template_id]
-            lexical_score = max(
-                lexical_scores.get(template_id, 0.0),
-                sample_similarity_score(norm_text, template.utterances),
-            )
+            lexical_score = lexical_scores.get(template_id, 0.0)
+            sample_score = sample_scores.get(template_id, 0.0)
             vector_score = vector_scores.get(template_id, 0.0)
+            fusion_score = fusion_scores.get(template_id, 0.0)
             slot_score = slot_fit_score(template, slots)
             constraint = constraint_score(template, norm_text, slots)
             structure_score = structural_alignment_score(template, slots)
@@ -171,12 +185,14 @@ class TemplateCapabilityEngine:
                 total = weighted_score(
                     {
                         "lexical": lexical_score,
+                        "sample": sample_score,
                         "vector": vector_score,
+                        "fusion": fusion_score,
                         "slot_fit": slot_score,
                         "constraint": constraint,
                         "structure": structure_score,
                     },
-                    self.config.settings.weights,
+                    rerank_weights,
                 )
             ranked.append(
                 TemplateCandidate(
@@ -184,7 +200,9 @@ class TemplateCapabilityEngine:
                     query_mode=template.query_mode,
                     score=total,
                     lexical_score=lexical_score,
+                    sample_score=sample_score,
                     vector_score=vector_score,
+                    fusion_score=fusion_score,
                     slot_fit_score=slot_score,
                     constraint_score=constraint,
                     structure_score=structure_score,
@@ -208,6 +226,17 @@ class TemplateCapabilityEngine:
             "utterances": mixed_terms(normalize_text(" ".join(template.utterances))),
             "must_terms": mixed_terms(normalize_text(must_terms_text)),
         }
+
+    def _sample_recall(self, query_term_set: set[str]) -> list[tuple[str, float]]:
+        scored = [
+            (
+                template_id,
+                sample_similarity_from_terms(query_term_set, utterance_term_sets),
+            )
+            for template_id, utterance_term_sets in self.template_sample_terms.items()
+        ]
+        scored.sort(key=lambda item: item[1], reverse=True)
+        return scored[: self.config.settings.recall_top_k]
 
     def _is_ambiguous(
         self,

@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Any
 
 from template_capability.models import (
+    DEFAULT_LEXICAL_FIELD_WEIGHTS,
+    DEFAULT_SCORE_WEIGHTS,
     MatcherSettings,
     SlotExtractorDefinition,
     TemplateDefinition,
@@ -35,22 +37,13 @@ def load_template_config(path: str | Path) -> TemplateConfig:
             str(key): float(value)
             for key, value in matcher_payload.get("weights", {}).items()
         }
-        or {
-            "lexical": 0.35,
-            "vector": 0.15,
-            "slot_fit": 0.2,
-            "constraint": 0.1,
-            "structure": 0.2,
-        },
+        or dict(DEFAULT_SCORE_WEIGHTS),
         lexical_field_weights={
             str(key): float(value)
             for key, value in matcher_payload.get("lexical_field_weights", {}).items()
         }
-        or {
-            "description": 0.6,
-            "utterances": 1.0,
-            "must_terms": 1.6,
-        },
+        or dict(DEFAULT_LEXICAL_FIELD_WEIGHTS),
+        fusion_rrf_k=int(matcher_payload.get("fusion_rrf_k", 60)),
         vector_dimension=int(vector_payload.get("dimension", 512)),
         blocked_terms=[str(term) for term in matcher_payload.get("blocked_terms", [])],
         llm_fallback_enabled=bool(fallback_payload.get("enabled", False)),
