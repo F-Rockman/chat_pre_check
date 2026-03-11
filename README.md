@@ -34,8 +34,8 @@
 
 1. `normalize_text`：文本标准化
 2. `slot_registry.extract`：配置驱动槽位抽取
-3. `BM25` + `char ngram` + `vector search`：候选召回与相似度打分
-4. `slot_fit` + `constraint`：模板约束校验
+3. `BM25F` + `char ngram` + `vector search`：候选召回与相似度打分
+4. `slot_fit` + `constraint` + `structure_score`：模板约束和结构校验
 5. 阈值和歧义判断：输出 `matched / partial / unmatched`
 
 设计原则：
@@ -288,25 +288,27 @@ python -m pytest -q
 
 当前不是严格字符串匹配，而是混合算法：
 
-1. `BM25` 词法召回
+1. `BM25F` 多字段词法召回
 2. `char ngram` 样本相似度
 3. `vector search` 向量召回
 4. `slot_fit_score` 槽位覆盖度
 5. `constraint_score` 模板约束得分
+6. `structure_score` 结构一致性得分
 
 最终分数：
 
 ```text
-total_score = lexical * w1 + vector * w2 + slot_fit * w3 + constraint * w4
+total_score = lexical * w1 + vector * w2 + slot_fit * w3 + constraint * w4 + structure * w5
 ```
 
 为什么这样设计：
 
-- `BM25` 处理显式关键词很稳
+- `BM25F` 比单文本 BM25 更适合模板多字段匹配
 - `char ngram` 对中文短句、语序变化、口语化更稳
 - `vector search` 处理更弱的表达改写
 - `slot_fit` 保证模板参数完整性
 - `constraint` 防止“看起来像，但其实不是这个模板”
+- `structure_score` 会惩罚 query 里多出的模板无法消费的条件
 
 ## 向量接口接入
 

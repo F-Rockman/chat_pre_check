@@ -4,10 +4,16 @@
     "ambiguity_margin": 0.03,
     "recall_top_k": 30,
     "weights": {
-      "lexical": 0.45,
-      "vector": 0.25,
+      "lexical": 0.35,
+      "vector": 0.15,
       "slot_fit": 0.2,
-      "constraint": 0.1
+      "constraint": 0.1,
+      "structure": 0.2
+    },
+    "lexical_field_weights": {
+      "description": 0.6,
+      "utterances": 1.0,
+      "must_terms": 1.6
     },
     "blocked_terms": [
       "分析",

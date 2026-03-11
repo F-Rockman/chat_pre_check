@@ -10,6 +10,8 @@ from template_capability.models import TemplateDefinition
 
 
 TOKEN_RE = re.compile(r"[a-z0-9_.-]+|[\u4e00-\u9fff]+")
+LOW_SIGNAL_SLOTS = {"time_range", "region_id"}
+FILTER_SLOTS = {"topn", "severity", "device_id", "protocol"}
 
 
 def mixed_terms(text: str) -> list[str]:
@@ -104,6 +106,82 @@ class BM25Index:
         return score
 
 
+@dataclass(slots=True)
+class BM25FieldIndex:
+    """简化版 BM25F，对模板多字段分别建模后加权求和。"""
+
+    documents: dict[str, dict[str, list[str]]]
+    field_weights: dict[str, float]
+    k1: float = 1.5
+    b: float = 0.75
+    doc_term_freqs: dict[str, dict[str, Counter[str]]] = field(init=False, default_factory=dict)
+    doc_lengths: dict[str, dict[str, int]] = field(init=False, default_factory=dict)
+    avg_field_lengths: dict[str, float] = field(init=False, default_factory=dict)
+    field_doc_freqs: dict[str, Counter[str]] = field(init=False, default_factory=dict)
+    total_docs: int = field(init=False, default=0)
+
+    def __post_init__(self) -> None:
+        self.total_docs = max(1, len(self.documents))
+        self.doc_term_freqs = {}
+        self.doc_lengths = {}
+        for doc_id, fields in self.documents.items():
+            self.doc_term_freqs[doc_id] = {}
+            self.doc_lengths[doc_id] = {}
+            for field_name in self.field_weights:
+                terms = fields.get(field_name, [])
+                term_freq = Counter(terms)
+                self.doc_term_freqs[doc_id][field_name] = term_freq
+                self.doc_lengths[doc_id][field_name] = sum(term_freq.values())
+
+        self.avg_field_lengths = {}
+        self.field_doc_freqs = {}
+        for field_name in self.field_weights:
+            total_length = sum(
+                self.doc_lengths[doc_id].get(field_name, 0)
+                for doc_id in self.documents
+            )
+            self.avg_field_lengths[field_name] = total_length / self.total_docs
+            doc_freqs: Counter[str] = Counter()
+            for doc_id in self.documents:
+                for term in self.doc_term_freqs[doc_id][field_name]:
+                    doc_freqs[term] += 1
+            self.field_doc_freqs[field_name] = doc_freqs
+
+    def search(self, query_text: str, top_k: int) -> list[tuple[str, float]]:
+        query_terms = mixed_terms(query_text)
+        results = [
+            (doc_id, self._score_doc(query_terms, doc_id))
+            for doc_id in self.documents
+        ]
+        results.sort(key=lambda item: item[1], reverse=True)
+        return results[:top_k]
+
+    def _score_doc(self, query_terms: list[str], doc_id: str) -> float:
+        score = 0.0
+        for field_name, field_weight in self.field_weights.items():
+            score += field_weight * self._score_field(query_terms, doc_id, field_name)
+        return score
+
+    def _score_field(self, query_terms: list[str], doc_id: str, field_name: str) -> float:
+        term_freq = self.doc_term_freqs.get(doc_id, {}).get(field_name, Counter())
+        doc_length = self.doc_lengths.get(doc_id, {}).get(field_name, 0)
+        avg_length = self.avg_field_lengths.get(field_name, 0.0)
+        doc_freqs = self.field_doc_freqs.get(field_name, Counter())
+        score = 0.0
+        for term in query_terms:
+            freq = term_freq.get(term)
+            if not freq:
+                continue
+            doc_freq = doc_freqs.get(term, 0)
+            idf = math.log(1 + (self.total_docs - doc_freq + 0.5) / (doc_freq + 0.5))
+            numerator = freq * (self.k1 + 1)
+            denominator = freq + self.k1 * (
+                1 - self.b + self.b * doc_length / max(1.0, avg_length)
+            )
+            score += idf * numerator / denominator
+        return score
+
+
 def normalize_candidate_scores(items: list[tuple[str, float]]) -> dict[str, float]:
     if not items:
         return {}
@@ -123,6 +201,45 @@ def slot_fit_score(template: TemplateDefinition, slots: dict[str, Any]) -> float
         return required_hit
     optional_hit = _coverage_score(optional, slots)
     return clamp_score(0.8 * required_hit + 0.2 * optional_hit)
+
+
+def structural_alignment_score(
+    template: TemplateDefinition,
+    slots: dict[str, Any],
+) -> float:
+    extracted_slots = {
+        slot_name
+        for slot_name, value in slots.items()
+        if value not in (None, "")
+    }
+    if not extracted_slots:
+        return 0.0
+    supported_slots = (
+        set(template.required_slots)
+        | set(template.optional_slots)
+        | set(template.slot_constraints)
+    )
+    if not supported_slots:
+        return 0.0
+
+    total_weight = sum(_slot_signal_weight(slot_name) for slot_name in extracted_slots)
+    unexpected_slots = extracted_slots - supported_slots
+    unexpected_weight = sum(_slot_signal_weight(slot_name) for slot_name in unexpected_slots)
+    coverage_score = 1.0 - unexpected_weight / max(1.0, total_weight)
+
+    extracted_filter_slots = {slot_name for slot_name in extracted_slots if _is_filter_slot(slot_name)}
+    if not extracted_filter_slots:
+        return clamp_score(coverage_score)
+
+    supported_filter_slots = {slot_name for slot_name in supported_slots if _is_filter_slot(slot_name)}
+    matched_filter_weight = sum(
+        _slot_signal_weight(slot_name)
+        for slot_name in extracted_filter_slots
+        if slot_name in supported_filter_slots
+    )
+    filter_total_weight = sum(_slot_signal_weight(slot_name) for slot_name in extracted_filter_slots)
+    filter_score = matched_filter_weight / max(1.0, filter_total_weight)
+    return clamp_score(0.55 * coverage_score + 0.45 * filter_score)
 
 
 def constraint_score(
@@ -218,3 +335,17 @@ def _flatten_value(value: Any) -> set[str]:
             candidates.add(str(value).lower())
         return candidates
     return {str(value).lower()}
+
+
+def _slot_signal_weight(slot_name: str) -> float:
+    if slot_name in LOW_SIGNAL_SLOTS:
+        return 0.5
+    if slot_name.endswith("_threshold"):
+        return 1.5
+    if slot_name in FILTER_SLOTS:
+        return 1.25
+    return 1.0
+
+
+def _is_filter_slot(slot_name: str) -> bool:
+    return slot_name.endswith("_threshold") or slot_name in FILTER_SLOTS

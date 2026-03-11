@@ -21,6 +21,7 @@ class MatcherSettings:
     ambiguity_margin: float
     recall_top_k: int
     weights: dict[str, float]
+    lexical_field_weights: dict[str, float] = field(default_factory=dict)
     vector_dimension: int = 512
     blocked_terms: list[str] = field(default_factory=list)
     llm_fallback_enabled: bool = False
@@ -64,6 +65,7 @@ class TemplateCandidate:
     vector_score: float
     slot_fit_score: float
     constraint_score: float
+    structure_score: float
     missing_slots: list[str]
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -76,6 +78,7 @@ class TemplateCandidate:
             "vector_score": self.vector_score,
             "slot_fit_score": self.slot_fit_score,
             "constraint_score": self.constraint_score,
+            "structure_score": self.structure_score,
             "missing_slots": self.missing_slots,
             "metadata": self.metadata,
         }

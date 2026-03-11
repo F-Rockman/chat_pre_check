@@ -5,7 +5,7 @@ from template_capability.extractors import build_slot_registry, normalize_text
 from template_capability.fallback import FallbackSuggestion, LLMFallbackResolver
 from template_capability.models import MatchResult, MatchStatus, TemplateCandidate, TemplateDefinition
 from template_capability.scoring import (
-    BM25Index,
+    BM25FieldIndex,
     constraint_score,
     has_negative_term,
     missing_required_slots,
@@ -13,6 +13,7 @@ from template_capability.scoring import (
     normalize_candidate_scores,
     sample_similarity_score,
     slot_fit_score,
+    structural_alignment_score,
     weighted_score,
 )
 from template_capability.vector_index import (
@@ -39,11 +40,13 @@ class TemplateCapabilityEngine:
             template.template_id: self._build_template_document(template)
             for template in config.templates
         }
-        self.lexical_index = BM25Index(
-            {
-                template_id: mixed_terms(document)
-                for template_id, document in self.template_documents.items()
-            }
+        self.template_lexical_fields = {
+            template.template_id: self._build_template_fields(template)
+            for template in config.templates
+        }
+        self.lexical_index = BM25FieldIndex(
+            self.template_lexical_fields,
+            config.settings.lexical_field_weights,
         )
         self.vector_backend = vector_backend or InMemoryVectorIndex(
             provider=HashingVectorProvider(config.settings.vector_dimension)
@@ -161,6 +164,7 @@ class TemplateCapabilityEngine:
             vector_score = vector_scores.get(template_id, 0.0)
             slot_score = slot_fit_score(template, slots)
             constraint = constraint_score(template, norm_text, slots)
+            structure_score = structural_alignment_score(template, slots)
             if has_negative_term(template, norm_text):
                 total = 0.0
             else:
@@ -170,6 +174,7 @@ class TemplateCapabilityEngine:
                         "vector": vector_score,
                         "slot_fit": slot_score,
                         "constraint": constraint,
+                        "structure": structure_score,
                     },
                     self.config.settings.weights,
                 )
@@ -182,6 +187,7 @@ class TemplateCapabilityEngine:
                     vector_score=vector_score,
                     slot_fit_score=slot_score,
                     constraint_score=constraint,
+                    structure_score=structure_score,
                     missing_slots=missing_required_slots(template, slots),
                     metadata=template.metadata,
                 )
@@ -194,6 +200,14 @@ class TemplateCapabilityEngine:
         parts = [template.description, *template.utterances]
         parts.extend(" ".join(group) for group in template.must_terms)
         return normalize_text(" ".join(part for part in parts if part))
+
+    def _build_template_fields(self, template: TemplateDefinition) -> dict[str, list[str]]:
+        must_terms_text = " ".join(" ".join(group) for group in template.must_terms)
+        return {
+            "description": mixed_terms(normalize_text(template.description)),
+            "utterances": mixed_terms(normalize_text(" ".join(template.utterances))),
+            "must_terms": mixed_terms(normalize_text(must_terms_text)),
+        }
 
     def _is_ambiguous(
         self,

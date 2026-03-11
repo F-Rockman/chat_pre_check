@@ -26,12 +26,16 @@ def test_match_device_cpu_memory_over_list_template():
     assert payload["status"] == "matched"
     assert payload["slots"]["cpu_threshold"] == 80.0
     assert payload["slots"]["memory_threshold"] == 70.0
+    assert payload["trace"]["top_candidates"][0]["template_id"] == "device.cpu.memory.over.list"
+    assert payload["trace"]["top_candidates"][0]["score"] > payload["trace"]["top_candidates"][1]["score"]
 
 
 def test_match_device_cpu_memory_disk_over_list_template():
     payload = build_engine().match("查询近24小时cpu大于80 内存大于70 磁盘大于85的设备列表").to_dict()
     assert payload["template_id"] == "device.cpu.memory.disk.over.list"
     assert payload["status"] == "matched"
+    assert payload["trace"]["top_candidates"][0]["template_id"] == "device.cpu.memory.disk.over.list"
+    assert payload["trace"]["top_candidates"][0]["score"] > payload["trace"]["top_candidates"][1]["score"]
 
 
 def test_partial_match_when_required_slot_missing():
