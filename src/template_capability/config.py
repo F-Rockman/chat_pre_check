@@ -29,6 +29,7 @@ def load_template_config(path: str | Path) -> TemplateConfig:
     matcher_payload = payload.get("matcher", {})
     vector_payload = matcher_payload.get("vector", {})
     fallback_payload = matcher_payload.get("llm_fallback", {})
+    slot_fallback_payload = matcher_payload.get("llm_slot_fallback", {})
     settings = MatcherSettings(
         match_threshold=float(matcher_payload.get("match_threshold", 0.58)),
         ambiguity_margin=float(matcher_payload.get("ambiguity_margin", 0.03)),
@@ -50,6 +51,10 @@ def load_template_config(path: str | Path) -> TemplateConfig:
         llm_fallback_max_candidates=int(fallback_payload.get("max_candidates", 3)),
         llm_fallback_score_margin=float(fallback_payload.get("score_margin", 0.08)),
         llm_fallback_max_missing_slots=int(fallback_payload.get("max_missing_slots", 2)),
+        llm_slot_fallback_enabled=bool(slot_fallback_payload.get("enabled", False)),
+        llm_slot_fallback_max_missing_slots=int(slot_fallback_payload.get("max_missing_slots", 2)),
+        llm_slot_fallback_min_score=float(slot_fallback_payload.get("min_score", matcher_payload.get("match_threshold", 0.58))),
+        llm_slot_fallback_allow_on_matched=bool(slot_fallback_payload.get("allow_on_matched", False)),
     )
 
     slot_extractors = {
@@ -83,6 +88,19 @@ def load_template_config(path: str | Path) -> TemplateConfig:
                 str(slot_name): _normalize_constraint_values(values)
                 for slot_name, values in item.get("slot_constraints", {}).items()
             },
+            slot_extractors={
+                str(slot_name): SlotExtractorDefinition(
+                    slot_name=str(slot_name),
+                    extractors=[
+                        dict(extractor)
+                        for extractor in definition.get("extractors", [])
+                        if isinstance(extractor, dict)
+                    ],
+                )
+                for slot_name, definition in item.get("slot_extractors", {}).items()
+                if isinstance(definition, dict)
+            },
+            llm_slot_extraction=dict(item.get("llm_slot_extraction", {})),
             metadata=dict(item.get("metadata", {})),
         )
         for item in payload.get("templates", [])

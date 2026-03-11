@@ -46,6 +46,10 @@ class MatcherSettings:
     llm_fallback_max_candidates: int = 3
     llm_fallback_score_margin: float = 0.08
     llm_fallback_max_missing_slots: int = 2
+    llm_slot_fallback_enabled: bool = False
+    llm_slot_fallback_max_missing_slots: int = 2
+    llm_slot_fallback_min_score: float = 0.58
+    llm_slot_fallback_allow_on_matched: bool = False
 
     def __post_init__(self) -> None:
         if not self.weights:
@@ -75,6 +79,8 @@ class TemplateDefinition:
     must_terms: list[list[str]]
     negative_terms: list[str]
     slot_constraints: dict[str, list[Any]]
+    slot_extractors: dict[str, "SlotExtractorDefinition"] = field(default_factory=dict)
+    llm_slot_extraction: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -92,7 +98,9 @@ class TemplateCandidate:
     slot_fit_score: float
     constraint_score: float
     structure_score: float
+    slots: dict[str, Any]
     missing_slots: list[str]
+    trace: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -107,7 +115,9 @@ class TemplateCandidate:
             "slot_fit_score": self.slot_fit_score,
             "constraint_score": self.constraint_score,
             "structure_score": self.structure_score,
+            "slots": self.slots,
             "missing_slots": self.missing_slots,
+            "trace": self.trace,
             "metadata": self.metadata,
         }
 

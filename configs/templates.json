@@ -37,279 +37,18 @@
       "score_margin": 0.08,
       "max_missing_slots": 2
     },
+    "llm_slot_fallback": {
+      "enabled": false,
+      "max_missing_slots": 2,
+      "min_score": 0.58,
+      "allow_on_matched": false
+    },
     "vector": {
       "provider": "hashing",
       "dimension": 512
     }
   },
-  "slot_extractors": {
-    "time_range": {
-      "extractors": [
-        {
-          "type": "keyword_value",
-          "cases": [
-            {
-              "terms": ["近24小时", "过去24小时", "24小时内", "最近24小时"],
-              "value": {
-                "mode": "relative",
-                "preset": "last_24h"
-              }
-            },
-            {
-              "terms": ["近7天", "过去7天", "7天内", "最近7天"],
-              "value": {
-                "mode": "relative",
-                "preset": "last_7d"
-              }
-            },
-            {
-              "terms": ["今天", "今日"],
-              "value": {
-                "mode": "relative",
-                "preset": "today"
-              }
-            },
-            {
-              "terms": ["昨天", "昨日"],
-              "value": {
-                "mode": "relative",
-                "preset": "yesterday"
-              }
-            },
-            {
-              "terms": ["最近"],
-              "value": {
-                "mode": "relative",
-                "preset": "recent"
-              }
-            }
-          ]
-        }
-      ]
-    },
-    "topn": {
-      "extractors": [
-        {
-          "type": "regex",
-          "patterns": [
-            {
-              "pattern": "(?:top\\s*|前)\\s*(\\d+)",
-              "group": 1,
-              "value_type": "int",
-              "min": 1,
-              "max": 1000
-            }
-          ]
-        }
-      ]
-    },
-    "region_id": {
-      "extractors": [
-        {
-          "type": "keyword_value",
-          "cases": [
-            {
-              "terms": ["华东"],
-              "value": "east_cn"
-            },
-            {
-              "terms": ["华南"],
-              "value": "south_cn"
-            },
-            {
-              "terms": ["华北"],
-              "value": "north_cn"
-            },
-            {
-              "terms": ["广州"],
-              "value": "region_gz"
-            },
-            {
-              "terms": ["深圳"],
-              "value": "region_sz"
-            },
-            {
-              "terms": ["北京"],
-              "value": "region_bj"
-            },
-            {
-              "terms": ["上海"],
-              "value": "region_sh"
-            }
-          ]
-        }
-      ]
-    },
-    "entity_type": {
-      "extractors": [
-        {
-          "type": "keyword_value",
-          "cases": [
-            {
-              "terms": ["接口"],
-              "value": "interface"
-            },
-            {
-              "terms": ["设备", "设别", "主机"],
-              "value": "device"
-            },
-            {
-              "terms": ["区域", "地市", "地区"],
-              "value": "region"
-            }
-          ]
-        }
-      ]
-    },
-    "metric": {
-      "extractors": [
-        {
-          "type": "keyword_value",
-          "cases": [
-            {
-              "terms": ["错误包", "错包"],
-              "value": "error_packet"
-            },
-            {
-              "terms": ["离线", "掉线"],
-              "value": "offline_count"
-            },
-            {
-              "terms": ["丢包率", "丢包"],
-              "value": "packet_loss"
-            },
-            {
-              "terms": ["告警数", "告警数量", "告警量", "告警"],
-              "value": "alarm_count"
-            },
-            {
-              "terms": ["cpu利用率", "cpu使用率", "cpu", "cup"],
-              "value": "cpu_usage"
-            },
-            {
-              "terms": ["内存利用率", "内存使用率", "内存", "memory"],
-              "value": "memory_usage"
-            },
-            {
-              "terms": ["磁盘利用率", "磁盘使用率", "磁盘", "disk"],
-              "value": "disk_usage"
-            }
-          ]
-        }
-      ]
-    },
-    "query_operator": {
-      "extractors": [
-        {
-          "type": "keyword_value",
-          "cases": [
-            {
-              "terms": ["top", "前", "排名", "排行"],
-              "value": "topn"
-            },
-            {
-              "terms": ["设备列表", "列表", "清单", "列出", "列出来", "哪些设备", "设备有哪些", "设备名单"],
-              "value": "list"
-            },
-            {
-              "terms": ["多少", "有多少", "数量", "数", "总数"],
-              "value": "count"
-            }
-          ]
-        }
-      ]
-    },
-    "severity": {
-      "extractors": [
-        {
-          "type": "keyword_value",
-          "cases": [
-            {
-              "terms": ["严重", "critical"],
-              "value": "critical"
-            },
-            {
-              "terms": ["次严重", "major"],
-              "value": "major"
-            },
-            {
-              "terms": ["一般", "minor"],
-              "value": "minor"
-            }
-          ]
-        }
-      ]
-    },
-    "cpu_threshold": {
-      "extractors": [
-        {
-          "type": "regex",
-          "patterns": [
-            {
-              "pattern": "(?:cpu|cup)(?:利用率|使用率)?\\s*(?:大于|大余|高于|超过|>|>=|不低于)\\s*(\\d+(?:\\.\\d+)?)\\s*%?",
-              "group": 1,
-              "value_type": "float",
-              "min": 0,
-              "max": 100
-            },
-            {
-              "pattern": "(?:大于|大余|高于|超过|>|>=|不低于)\\s*(\\d+(?:\\.\\d+)?)\\s*%?\\s*的?\\s*(?:cpu|cup)(?:利用率|使用率)?",
-              "group": 1,
-              "value_type": "float",
-              "min": 0,
-              "max": 100
-            }
-          ]
-        }
-      ]
-    },
-    "memory_threshold": {
-      "extractors": [
-        {
-          "type": "regex",
-          "patterns": [
-            {
-              "pattern": "内存(?:利用率|使用率)?\\s*(?:大于|大余|高于|超过|>|>=|不低于)\\s*(\\d+(?:\\.\\d+)?)\\s*%?",
-              "group": 1,
-              "value_type": "float",
-              "min": 0,
-              "max": 100
-            },
-            {
-              "pattern": "(?:大于|大余|高于|超过|>|>=|不低于)\\s*(\\d+(?:\\.\\d+)?)\\s*%?\\s*的?\\s*内存(?:利用率|使用率)?",
-              "group": 1,
-              "value_type": "float",
-              "min": 0,
-              "max": 100
-            }
-          ]
-        }
-      ]
-    },
-    "disk_threshold": {
-      "extractors": [
-        {
-          "type": "regex",
-          "patterns": [
-            {
-              "pattern": "(?:磁盘|disk)(?:利用率|使用率)?\\s*(?:大于|大余|高于|超过|>|>=|不低于)\\s*(\\d+(?:\\.\\d+)?)\\s*%?",
-              "group": 1,
-              "value_type": "float",
-              "min": 0,
-              "max": 100
-            },
-            {
-              "pattern": "(?:大于|大余|高于|超过|>|>=|不低于)\\s*(\\d+(?:\\.\\d+)?)\\s*%?\\s*的?\\s*(?:磁盘|disk)(?:利用率|使用率)?",
-              "group": 1,
-              "value_type": "float",
-              "min": 0,
-              "max": 100
-            }
-          ]
-        }
-      ]
-    }
-  },
+  "slot_extractors": {},
   "templates": [
     {
       "template_id": "alarm.interface.error.topn",
@@ -335,6 +74,87 @@
         "entity_type": ["interface"],
         "metric": ["error_packet"],
         "query_operator": ["topn"]
+      },
+      "slot_extractors": {
+        "time_range": {
+          "extractors": [
+            {
+              "type": "keyword_value",
+              "cases": [
+                {
+                  "terms": ["近24小时", "过去24小时", "24小时内", "最近24小时"],
+                  "value": {"mode": "relative", "preset": "last_24h"}
+                },
+                {
+                  "terms": ["近7天", "过去7天", "7天内", "最近7天"],
+                  "value": {"mode": "relative", "preset": "last_7d"}
+                }
+              ]
+            }
+          ]
+        },
+        "topn": {
+          "extractors": [
+            {
+              "type": "regex",
+              "patterns": [
+                {
+                  "pattern": "(?:top\\s*|前)\\s*(\\d+)",
+                  "group": 1,
+                  "value_type": "int",
+                  "min": 1,
+                  "max": 1000
+                }
+              ]
+            }
+          ]
+        },
+        "region_id": {
+          "extractors": [
+            {
+              "type": "keyword_value",
+              "cases": [
+                {"terms": ["华东"], "value": "east_cn"},
+                {"terms": ["上海"], "value": "region_sh"}
+              ]
+            }
+          ]
+        },
+        "entity_type": {
+          "extractors": [
+            {
+              "type": "keyword_value",
+              "cases": [
+                {"terms": ["接口"], "value": "interface"}
+              ]
+            }
+          ]
+        },
+        "metric": {
+          "extractors": [
+            {
+              "type": "keyword_value",
+              "cases": [
+                {"terms": ["错误包", "错包"], "value": "error_packet"}
+              ]
+            }
+          ]
+        },
+        "query_operator": {
+          "extractors": [
+            {
+              "type": "keyword_value",
+              "cases": [
+                {"terms": ["top", "前", "排名", "排行"], "value": "topn"}
+              ]
+            }
+          ]
+        }
+      },
+      "llm_slot_extraction": {
+        "enabled": true,
+        "slots": ["time_range", "topn", "region_id"],
+        "instructions": "仅补充接口错误包告警排行模板中的时间、区域和TopN参数。"
       },
       "metadata": {
         "metric_code": "interface_error_alarm_topn"
@@ -364,6 +184,83 @@
         "metric": ["offline_count"],
         "query_operator": ["count"]
       },
+      "slot_extractors": {
+        "time_range": {
+          "extractors": [
+            {
+              "type": "keyword_value",
+              "cases": [
+                {
+                  "terms": ["近24小时", "过去24小时", "24小时内", "最近24小时"],
+                  "value": {"mode": "relative", "preset": "last_24h"}
+                },
+                {
+                  "terms": ["近7天", "过去7天", "7天内", "最近7天"],
+                  "value": {"mode": "relative", "preset": "last_7d"}
+                },
+                {
+                  "terms": ["今天", "今日"],
+                  "value": {"mode": "relative", "preset": "today"}
+                },
+                {
+                  "terms": ["昨天", "昨日"],
+                  "value": {"mode": "relative", "preset": "yesterday"}
+                }
+              ]
+            }
+          ]
+        },
+        "region_id": {
+          "extractors": [
+            {
+              "type": "keyword_value",
+              "cases": [
+                {"terms": ["华东"], "value": "east_cn"},
+                {"terms": ["华北"], "value": "north_cn"},
+                {"terms": ["广州"], "value": "region_gz"},
+                {"terms": ["北京"], "value": "region_bj"},
+                {"terms": ["深圳"], "value": "region_sz"},
+                {"terms": ["上海"], "value": "region_sh"}
+              ]
+            }
+          ]
+        },
+        "entity_type": {
+          "extractors": [
+            {
+              "type": "keyword_value",
+              "cases": [
+                {"terms": ["设备", "主机"], "value": "device"}
+              ]
+            }
+          ]
+        },
+        "metric": {
+          "extractors": [
+            {
+              "type": "keyword_value",
+              "cases": [
+                {"terms": ["离线", "掉线"], "value": "offline_count"}
+              ]
+            }
+          ]
+        },
+        "query_operator": {
+          "extractors": [
+            {
+              "type": "keyword_value",
+              "cases": [
+                {"terms": ["多少", "有多少", "数量", "数", "总数"], "value": "count"}
+              ]
+            }
+          ]
+        }
+      },
+      "llm_slot_extraction": {
+        "enabled": true,
+        "slots": ["time_range", "region_id", "query_operator"],
+        "instructions": "仅补充离线设备数量模板中的时间、区域和数量算子。"
+      },
       "metadata": {
         "metric_code": "device_offline_count"
       }
@@ -392,6 +289,90 @@
         "metric": ["packet_loss"],
         "query_operator": ["topn"]
       },
+      "slot_extractors": {
+        "time_range": {
+          "extractors": [
+            {
+              "type": "keyword_value",
+              "cases": [
+                {
+                  "terms": ["近24小时", "过去24小时", "24小时内", "最近24小时"],
+                  "value": {"mode": "relative", "preset": "last_24h"}
+                },
+                {
+                  "terms": ["近7天", "过去7天", "7天内", "最近7天"],
+                  "value": {"mode": "relative", "preset": "last_7d"}
+                },
+                {
+                  "terms": ["昨天", "昨日"],
+                  "value": {"mode": "relative", "preset": "yesterday"}
+                }
+              ]
+            }
+          ]
+        },
+        "topn": {
+          "extractors": [
+            {
+              "type": "regex",
+              "patterns": [
+                {
+                  "pattern": "(?:top\\s*|前)\\s*(\\d+)",
+                  "group": 1,
+                  "value_type": "int",
+                  "min": 1,
+                  "max": 1000
+                }
+              ]
+            }
+          ]
+        },
+        "region_id": {
+          "extractors": [
+            {
+              "type": "keyword_value",
+              "cases": [
+                {"terms": ["华东"], "value": "east_cn"}
+              ]
+            }
+          ]
+        },
+        "entity_type": {
+          "extractors": [
+            {
+              "type": "keyword_value",
+              "cases": [
+                {"terms": ["区域", "地市", "地区"], "value": "region"}
+              ]
+            }
+          ]
+        },
+        "metric": {
+          "extractors": [
+            {
+              "type": "keyword_value",
+              "cases": [
+                {"terms": ["丢包率", "丢包"], "value": "packet_loss"}
+              ]
+            }
+          ]
+        },
+        "query_operator": {
+          "extractors": [
+            {
+              "type": "keyword_value",
+              "cases": [
+                {"terms": ["top", "前", "排名", "排行"], "value": "topn"}
+              ]
+            }
+          ]
+        }
+      },
+      "llm_slot_extraction": {
+        "enabled": true,
+        "slots": ["time_range", "topn", "region_id"],
+        "instructions": "仅补充区域丢包率排名模板中的时间、区域和TopN参数。"
+      },
       "metadata": {
         "metric_code": "packet_loss_rank_topn"
       }
@@ -419,6 +400,82 @@
         "metric": ["alarm_count"],
         "severity": ["critical"],
         "query_operator": ["count"]
+      },
+      "slot_extractors": {
+        "time_range": {
+          "extractors": [
+            {
+              "type": "keyword_value",
+              "cases": [
+                {
+                  "terms": ["近24小时", "过去24小时", "24小时内", "最近24小时"],
+                  "value": {"mode": "relative", "preset": "last_24h"}
+                },
+                {
+                  "terms": ["近7天", "过去7天", "7天内", "最近7天"],
+                  "value": {"mode": "relative", "preset": "last_7d"}
+                },
+                {
+                  "terms": ["今天", "今日"],
+                  "value": {"mode": "relative", "preset": "today"}
+                },
+                {
+                  "terms": ["昨天", "昨日"],
+                  "value": {"mode": "relative", "preset": "yesterday"}
+                }
+              ]
+            }
+          ]
+        },
+        "region_id": {
+          "extractors": [
+            {
+              "type": "keyword_value",
+              "cases": [
+                {"terms": ["广州"], "value": "region_gz"},
+                {"terms": ["北京"], "value": "region_bj"},
+                {"terms": ["华东"], "value": "east_cn"},
+                {"terms": ["深圳"], "value": "region_sz"},
+                {"terms": ["华北"], "value": "north_cn"}
+              ]
+            }
+          ]
+        },
+        "severity": {
+          "extractors": [
+            {
+              "type": "keyword_value",
+              "cases": [
+                {"terms": ["严重", "critical"], "value": "critical"}
+              ]
+            }
+          ]
+        },
+        "metric": {
+          "extractors": [
+            {
+              "type": "keyword_value",
+              "cases": [
+                {"terms": ["告警", "告警数", "告警数量", "告警总数"], "value": "alarm_count"}
+              ]
+            }
+          ]
+        },
+        "query_operator": {
+          "extractors": [
+            {
+              "type": "keyword_value",
+              "cases": [
+                {"terms": ["多少", "有多少", "数量", "数", "总数"], "value": "count"}
+              ]
+            }
+          ]
+        }
+      },
+      "llm_slot_extraction": {
+        "enabled": true,
+        "slots": ["time_range", "severity", "query_operator", "region_id"],
+        "instructions": "仅补充严重告警数量模板中的时间、等级、区域和数量算子。"
       },
       "metadata": {
         "metric_code": "critical_alarm_count"
@@ -449,6 +506,101 @@
         "metric": ["cpu_usage"],
         "query_operator": ["list"]
       },
+      "slot_extractors": {
+        "time_range": {
+          "extractors": [
+            {
+              "type": "keyword_value",
+              "cases": [
+                {
+                  "terms": ["近24小时", "过去24小时", "24小时内", "最近24小时"],
+                  "value": {"mode": "relative", "preset": "last_24h"}
+                },
+                {
+                  "terms": ["近7天", "过去7天", "7天内", "最近7天"],
+                  "value": {"mode": "relative", "preset": "last_7d"}
+                },
+                {
+                  "terms": ["最近"],
+                  "value": {"mode": "relative", "preset": "recent"}
+                }
+              ]
+            }
+          ]
+        },
+        "region_id": {
+          "extractors": [
+            {
+              "type": "keyword_value",
+              "cases": [
+                {"terms": ["华东"], "value": "east_cn"},
+                {"terms": ["上海"], "value": "region_sh"}
+              ]
+            }
+          ]
+        },
+        "entity_type": {
+          "extractors": [
+            {
+              "type": "keyword_value",
+              "cases": [
+                {"terms": ["设备", "设别", "主机"], "value": "device"}
+              ]
+            }
+          ]
+        },
+        "metric": {
+          "extractors": [
+            {
+              "type": "keyword_value",
+              "cases": [
+                {"terms": ["cpu", "cup"], "value": "cpu_usage"}
+              ]
+            }
+          ]
+        },
+        "query_operator": {
+          "extractors": [
+            {
+              "type": "keyword_value",
+              "cases": [
+                {
+                  "terms": ["设备列表", "列表", "清单", "列出", "列出来", "哪些设备", "设备有哪些", "设备名单"],
+                  "value": "list"
+                }
+              ]
+            }
+          ]
+        },
+        "cpu_threshold": {
+          "extractors": [
+            {
+              "type": "regex",
+              "patterns": [
+                {
+                  "pattern": "(?:cpu|cup)(?:利用率|使用率)?\\s*(?:大于|大余|高于|超过|>|>=|不低于)\\s*(\\d+(?:\\.\\d+)?)\\s*%?",
+                  "group": 1,
+                  "value_type": "float",
+                  "min": 0,
+                  "max": 100
+                },
+                {
+                  "pattern": "(?:大于|大余|高于|超过|>|>=|不低于)\\s*(\\d+(?:\\.\\d+)?)\\s*%?\\s*的?\\s*(?:cpu|cup)(?:利用率|使用率)?",
+                  "group": 1,
+                  "value_type": "float",
+                  "min": 0,
+                  "max": 100
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "llm_slot_extraction": {
+        "enabled": true,
+        "slots": ["time_range", "region_id", "cpu_threshold", "query_operator"],
+        "instructions": "仅补充CPU阈值设备列表模板中的时间、区域、CPU阈值和列表算子。"
+      },
       "metadata": {
         "metric_code": "device_cpu_over_list"
       }
@@ -477,6 +629,101 @@
         "entity_type": ["device"],
         "metric": ["memory_usage"],
         "query_operator": ["list"]
+      },
+      "slot_extractors": {
+        "time_range": {
+          "extractors": [
+            {
+              "type": "keyword_value",
+              "cases": [
+                {
+                  "terms": ["近24小时", "过去24小时", "24小时内", "最近24小时"],
+                  "value": {"mode": "relative", "preset": "last_24h"}
+                },
+                {
+                  "terms": ["近7天", "过去7天", "7天内", "最近7天"],
+                  "value": {"mode": "relative", "preset": "last_7d"}
+                },
+                {
+                  "terms": ["最近"],
+                  "value": {"mode": "relative", "preset": "recent"}
+                }
+              ]
+            }
+          ]
+        },
+        "region_id": {
+          "extractors": [
+            {
+              "type": "keyword_value",
+              "cases": [
+                {"terms": ["华南"], "value": "south_cn"},
+                {"terms": ["北京"], "value": "region_bj"}
+              ]
+            }
+          ]
+        },
+        "entity_type": {
+          "extractors": [
+            {
+              "type": "keyword_value",
+              "cases": [
+                {"terms": ["设备", "设别", "主机"], "value": "device"}
+              ]
+            }
+          ]
+        },
+        "metric": {
+          "extractors": [
+            {
+              "type": "keyword_value",
+              "cases": [
+                {"terms": ["内存", "memory"], "value": "memory_usage"}
+              ]
+            }
+          ]
+        },
+        "query_operator": {
+          "extractors": [
+            {
+              "type": "keyword_value",
+              "cases": [
+                {
+                  "terms": ["设备列表", "列表", "清单", "列出", "列出来", "哪些设备", "设备有哪些", "设备名单"],
+                  "value": "list"
+                }
+              ]
+            }
+          ]
+        },
+        "memory_threshold": {
+          "extractors": [
+            {
+              "type": "regex",
+              "patterns": [
+                {
+                  "pattern": "内存(?:利用率|使用率)?\\s*(?:大于|大余|高于|超过|>|>=|不低于)\\s*(\\d+(?:\\.\\d+)?)\\s*%?",
+                  "group": 1,
+                  "value_type": "float",
+                  "min": 0,
+                  "max": 100
+                },
+                {
+                  "pattern": "(?:大于|大余|高于|超过|>|>=|不低于)\\s*(\\d+(?:\\.\\d+)?)\\s*%?\\s*的?\\s*内存(?:利用率|使用率)?",
+                  "group": 1,
+                  "value_type": "float",
+                  "min": 0,
+                  "max": 100
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "llm_slot_extraction": {
+        "enabled": true,
+        "slots": ["time_range", "region_id", "memory_threshold", "query_operator"],
+        "instructions": "仅补充内存阈值设备列表模板中的时间、区域、内存阈值和列表算子。"
       },
       "metadata": {
         "metric_code": "device_memory_over_list"
@@ -507,6 +754,114 @@
         "entity_type": ["device"],
         "query_operator": ["list"]
       },
+      "slot_extractors": {
+        "time_range": {
+          "extractors": [
+            {
+              "type": "keyword_value",
+              "cases": [
+                {
+                  "terms": ["近24小时", "过去24小时", "24小时内", "最近24小时"],
+                  "value": {"mode": "relative", "preset": "last_24h"}
+                },
+                {
+                  "terms": ["近7天", "过去7天", "7天内", "最近7天"],
+                  "value": {"mode": "relative", "preset": "last_7d"}
+                },
+                {
+                  "terms": ["最近"],
+                  "value": {"mode": "relative", "preset": "recent"}
+                }
+              ]
+            }
+          ]
+        },
+        "region_id": {
+          "extractors": [
+            {
+              "type": "keyword_value",
+              "cases": [
+                {"terms": ["华东"], "value": "east_cn"},
+                {"terms": ["上海"], "value": "region_sh"}
+              ]
+            }
+          ]
+        },
+        "entity_type": {
+          "extractors": [
+            {
+              "type": "keyword_value",
+              "cases": [
+                {"terms": ["设备", "设别", "主机"], "value": "device"}
+              ]
+            }
+          ]
+        },
+        "query_operator": {
+          "extractors": [
+            {
+              "type": "keyword_value",
+              "cases": [
+                {
+                  "terms": ["设备列表", "列表", "清单", "列出", "列出来", "哪些设备", "设备有哪些", "设备名单"],
+                  "value": "list"
+                }
+              ]
+            }
+          ]
+        },
+        "cpu_threshold": {
+          "extractors": [
+            {
+              "type": "regex",
+              "patterns": [
+                {
+                  "pattern": "(?:cpu|cup)(?:利用率|使用率)?\\s*(?:大于|大余|高于|超过|>|>=|不低于)\\s*(\\d+(?:\\.\\d+)?)\\s*%?",
+                  "group": 1,
+                  "value_type": "float",
+                  "min": 0,
+                  "max": 100
+                },
+                {
+                  "pattern": "(?:大于|大余|高于|超过|>|>=|不低于)\\s*(\\d+(?:\\.\\d+)?)\\s*%?\\s*的?\\s*(?:cpu|cup)(?:利用率|使用率)?",
+                  "group": 1,
+                  "value_type": "float",
+                  "min": 0,
+                  "max": 100
+                }
+              ]
+            }
+          ]
+        },
+        "memory_threshold": {
+          "extractors": [
+            {
+              "type": "regex",
+              "patterns": [
+                {
+                  "pattern": "内存(?:利用率|使用率)?\\s*(?:大于|大余|高于|超过|>|>=|不低于)\\s*(\\d+(?:\\.\\d+)?)\\s*%?",
+                  "group": 1,
+                  "value_type": "float",
+                  "min": 0,
+                  "max": 100
+                },
+                {
+                  "pattern": "(?:大于|大余|高于|超过|>|>=|不低于)\\s*(\\d+(?:\\.\\d+)?)\\s*%?\\s*的?\\s*内存(?:利用率|使用率)?",
+                  "group": 1,
+                  "value_type": "float",
+                  "min": 0,
+                  "max": 100
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "llm_slot_extraction": {
+        "enabled": true,
+        "slots": ["time_range", "region_id", "cpu_threshold", "memory_threshold", "query_operator"],
+        "instructions": "仅补充CPU和内存双阈值设备列表模板中的时间、区域、阈值和列表算子。"
+      },
       "metadata": {
         "metric_code": "device_cpu_memory_over_list"
       }
@@ -535,6 +890,137 @@
       "slot_constraints": {
         "entity_type": ["device"],
         "query_operator": ["list"]
+      },
+      "slot_extractors": {
+        "time_range": {
+          "extractors": [
+            {
+              "type": "keyword_value",
+              "cases": [
+                {
+                  "terms": ["近24小时", "过去24小时", "24小时内", "最近24小时"],
+                  "value": {"mode": "relative", "preset": "last_24h"}
+                },
+                {
+                  "terms": ["近7天", "过去7天", "7天内", "最近7天"],
+                  "value": {"mode": "relative", "preset": "last_7d"}
+                },
+                {
+                  "terms": ["最近"],
+                  "value": {"mode": "relative", "preset": "recent"}
+                }
+              ]
+            }
+          ]
+        },
+        "region_id": {
+          "extractors": [
+            {
+              "type": "keyword_value",
+              "cases": [
+                {"terms": ["华南"], "value": "south_cn"},
+                {"terms": ["上海"], "value": "region_sh"}
+              ]
+            }
+          ]
+        },
+        "entity_type": {
+          "extractors": [
+            {
+              "type": "keyword_value",
+              "cases": [
+                {"terms": ["设备", "设别", "主机"], "value": "device"}
+              ]
+            }
+          ]
+        },
+        "query_operator": {
+          "extractors": [
+            {
+              "type": "keyword_value",
+              "cases": [
+                {
+                  "terms": ["设备列表", "列表", "清单", "列出", "列出来", "哪些设备", "设备有哪些", "设备名单"],
+                  "value": "list"
+                }
+              ]
+            }
+          ]
+        },
+        "cpu_threshold": {
+          "extractors": [
+            {
+              "type": "regex",
+              "patterns": [
+                {
+                  "pattern": "(?:cpu|cup)(?:利用率|使用率)?\\s*(?:大于|大余|高于|超过|>|>=|不低于)\\s*(\\d+(?:\\.\\d+)?)\\s*%?",
+                  "group": 1,
+                  "value_type": "float",
+                  "min": 0,
+                  "max": 100
+                },
+                {
+                  "pattern": "(?:大于|大余|高于|超过|>|>=|不低于)\\s*(\\d+(?:\\.\\d+)?)\\s*%?\\s*的?\\s*(?:cpu|cup)(?:利用率|使用率)?",
+                  "group": 1,
+                  "value_type": "float",
+                  "min": 0,
+                  "max": 100
+                }
+              ]
+            }
+          ]
+        },
+        "memory_threshold": {
+          "extractors": [
+            {
+              "type": "regex",
+              "patterns": [
+                {
+                  "pattern": "内存(?:利用率|使用率)?\\s*(?:大于|大余|高于|超过|>|>=|不低于)\\s*(\\d+(?:\\.\\d+)?)\\s*%?",
+                  "group": 1,
+                  "value_type": "float",
+                  "min": 0,
+                  "max": 100
+                },
+                {
+                  "pattern": "(?:大于|大余|高于|超过|>|>=|不低于)\\s*(\\d+(?:\\.\\d+)?)\\s*%?\\s*的?\\s*内存(?:利用率|使用率)?",
+                  "group": 1,
+                  "value_type": "float",
+                  "min": 0,
+                  "max": 100
+                }
+              ]
+            }
+          ]
+        },
+        "disk_threshold": {
+          "extractors": [
+            {
+              "type": "regex",
+              "patterns": [
+                {
+                  "pattern": "(?:磁盘|disk)(?:利用率|使用率)?\\s*(?:大于|大余|高于|超过|>|>=|不低于)\\s*(\\d+(?:\\.\\d+)?)\\s*%?",
+                  "group": 1,
+                  "value_type": "float",
+                  "min": 0,
+                  "max": 100
+                },
+                {
+                  "pattern": "(?:大于|大余|高于|超过|>|>=|不低于)\\s*(\\d+(?:\\.\\d+)?)\\s*%?\\s*的?\\s*(?:磁盘|disk)(?:利用率|使用率)?",
+                  "group": 1,
+                  "value_type": "float",
+                  "min": 0,
+                  "max": 100
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "llm_slot_extraction": {
+        "enabled": true,
+        "slots": ["time_range", "region_id", "cpu_threshold", "memory_threshold", "disk_threshold", "query_operator"],
+        "instructions": "仅补充CPU、内存、磁盘三阈值设备列表模板中的时间、区域、阈值和列表算子。"
       },
       "metadata": {
         "metric_code": "device_cpu_memory_disk_over_list"

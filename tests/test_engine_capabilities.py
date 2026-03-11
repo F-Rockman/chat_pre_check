@@ -4,7 +4,7 @@ import time
 
 from template_capability.config import TemplateConfig
 from template_capability.engine import TemplateCapabilityEngine
-from template_capability.fallback import FallbackSuggestion
+from template_capability.fallback import FallbackSuggestion, SlotFallbackSuggestion
 from template_capability.models import MatchStatus, MatcherSettings, SlotExtractorDefinition, TemplateDefinition
 
 
@@ -42,6 +42,32 @@ class StubFallbackResolver:
                 "slots": dict(slots),
                 "candidate_count": len(candidates),
                 "template_count": len(templates),
+            }
+        )
+        return self.suggestion
+
+
+class StubTemplateSlotResolver:
+    def __init__(self, suggestion: SlotFallbackSuggestion | None) -> None:
+        self.suggestion = suggestion
+        self.calls: list[dict[str, object]] = []
+
+    def resolve_slots(
+        self,
+        *,
+        input_text: str,
+        normalized_text: str,
+        template: TemplateDefinition,
+        current_slots: dict[str, object],
+        missing_slots: list[str],
+    ) -> SlotFallbackSuggestion | None:
+        self.calls.append(
+            {
+                "input_text": input_text,
+                "normalized_text": normalized_text,
+                "template_id": template.template_id,
+                "current_slots": dict(current_slots),
+                "missing_slots": list(missing_slots),
             }
         )
         return self.suggestion
@@ -262,6 +288,88 @@ def test_llm_fallback_stays_off_for_blocked_queries():
     assert payload["template_id"] == -1
     assert payload["status"] == "unmatched"
     assert fallback.calls == []
+
+
+def test_template_slot_fallback_can_fill_missing_slots_after_match():
+    backend = StubVectorBackend()
+    slot_resolver = StubTemplateSlotResolver(
+        SlotFallbackSuggestion(
+            slots={"topn": 10},
+            trace={"source": "stub_slot"},
+        )
+    )
+    engine = TemplateCapabilityEngine(
+        TemplateConfig(
+            settings=MatcherSettings(
+                match_threshold=0.58,
+                ambiguity_margin=0.03,
+                recall_top_k=10,
+                weights={
+                    "lexical": 0.7,
+                    "vector": 0.0,
+                    "slot_fit": 0.2,
+                    "constraint": 0.1,
+                },
+                vector_dimension=512,
+                llm_slot_fallback_enabled=True,
+                llm_slot_fallback_max_missing_slots=1,
+                llm_slot_fallback_min_score=0.58,
+            ),
+            slot_extractors={
+                "time_range": SlotExtractorDefinition(
+                    slot_name="time_range",
+                    extractors=[
+                        {
+                            "type": "keyword_value",
+                            "cases": [
+                                {
+                                    "terms": ["近24小时"],
+                                    "value": {"mode": "relative", "preset": "last_24h"},
+                                }
+                            ],
+                        }
+                    ],
+                ),
+                "query_operator": SlotExtractorDefinition(
+                    slot_name="query_operator",
+                    extractors=[
+                        {
+                            "type": "keyword_value",
+                            "cases": [
+                                {"terms": ["top", "前", "排名", "排行"], "value": "topn"}
+                            ],
+                        }
+                    ],
+                ),
+            },
+            templates=[
+                TemplateDefinition(
+                    template_id="metric.rank.demo",
+                    query_mode="metric_query",
+                    description="查询演示指标排名",
+                    utterances=["近24小时演示指标Top10"],
+                    required_slots=["time_range", "query_operator", "topn"],
+                    optional_slots=[],
+                    must_terms=[["演示指标"], ["top", "前", "排名", "排行"]],
+                    negative_terms=[],
+                    slot_constraints={"query_operator": ["topn"]},
+                    llm_slot_extraction={
+                        "enabled": True,
+                        "slots": ["topn"],
+                    },
+                )
+            ],
+        ),
+        vector_backend=backend,
+        llm_template_slot_resolver=slot_resolver,
+    )
+
+    payload = engine.match("近24小时演示指标排行").to_dict()
+    assert payload["template_id"] == "metric.rank.demo"
+    assert payload["status"] == "matched"
+    assert payload["slots"]["topn"] == 10
+    assert payload["trace"]["selected_template"]["trace"]["slot_fallback_used"] is True
+    assert slot_resolver.calls
 
 
 def test_ambiguous_templates_return_minus_one():

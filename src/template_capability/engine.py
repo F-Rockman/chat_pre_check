@@ -1,9 +1,21 @@
 from __future__ import annotations
 
+import copy
+
 from template_capability.config import TemplateConfig, load_template_config
 from template_capability.extractors import build_slot_registry, normalize_text
-from template_capability.fallback import FallbackSuggestion, LLMFallbackResolver
-from template_capability.models import MatchResult, MatchStatus, TemplateCandidate, TemplateDefinition
+from template_capability.fallback import (
+    FallbackSuggestion,
+    LLMFallbackResolver,
+    LLMTemplateSlotResolver,
+)
+from template_capability.models import (
+    MatchResult,
+    MatchStatus,
+    SlotExtractorDefinition,
+    TemplateCandidate,
+    TemplateDefinition,
+)
 from template_capability.scoring import (
     BM25FieldIndex,
     adaptive_score_weights,
@@ -34,11 +46,17 @@ class TemplateCapabilityEngine:
         config: TemplateConfig,
         vector_backend: VectorSearchBackend | None = None,
         llm_fallback_resolver: LLMFallbackResolver | None = None,
+        llm_template_slot_resolver: LLMTemplateSlotResolver | None = None,
     ) -> None:
         self.config = config
         self.llm_fallback_resolver = llm_fallback_resolver
+        self.llm_template_slot_resolver = llm_template_slot_resolver
         self.slot_registry = build_slot_registry(config.slot_extractors)
         self.templates = {template.template_id: template for template in config.templates}
+        self.template_slot_registries = {
+            template.template_id: build_slot_registry(self._build_template_slot_definitions(template))
+            for template in config.templates
+        }
         self.template_documents = {
             template.template_id: self._build_template_document(template)
             for template in config.templates
@@ -66,7 +84,7 @@ class TemplateCapabilityEngine:
 
     def match(self, input_text: str) -> MatchResult:
         norm_text = normalize_text(input_text)
-        slots = self.slot_registry.extract(norm_text)
+        shared_slots = self.slot_registry.extract(norm_text)
         blocked_term = self._match_blocked_term(norm_text)
         if blocked_term is not None:
             return MatchResult(
@@ -74,7 +92,7 @@ class TemplateCapabilityEngine:
                 status=MatchStatus.UNMATCHED,
                 score=0.0,
                 query_mode=None,
-                slots=slots,
+                slots=shared_slots,
                 missing_slots=[],
                 trace={
                     "norm_text": norm_text,
@@ -82,7 +100,7 @@ class TemplateCapabilityEngine:
                     "reason": "blocked_intent",
                 },
             )
-        ranked = self._rank_templates(norm_text, slots)
+        ranked = self._rank_templates(norm_text)
         top = ranked[0] if ranked else None
         second = ranked[1] if len(ranked) > 1 else None
 
@@ -94,7 +112,7 @@ class TemplateCapabilityEngine:
             fallback_result = self._resolve_with_fallback(
                 input_text=input_text,
                 norm_text=norm_text,
-                slots=slots,
+                slots=shared_slots,
                 ranked=ranked,
                 missing_slots=[],
                 base_status=MatchStatus.UNMATCHED,
@@ -106,7 +124,7 @@ class TemplateCapabilityEngine:
                 status=MatchStatus.UNMATCHED,
                 score=top.score if top is not None else 0.0,
                 query_mode=None,
-                slots=slots,
+                slots=shared_slots,
                 missing_slots=[],
                 trace={
                     "norm_text": norm_text,
@@ -117,13 +135,28 @@ class TemplateCapabilityEngine:
             )
 
         template = self.templates[top.template_id]
+        slots = dict(top.slots)
+        missing_slots = missing_required_slots(template, slots)
+        status = MatchStatus.MATCHED if not missing_slots else MatchStatus.PARTIAL
+        top = self._resolve_template_slots_with_fallback(
+            input_text=input_text,
+            norm_text=norm_text,
+            candidate=top,
+            status=status,
+        )
+        display_candidates = [top] + [
+            candidate
+            for candidate in ranked
+            if candidate.template_id != top.template_id
+        ]
+        slots = dict(top.slots)
         missing_slots = missing_required_slots(template, slots)
         status = MatchStatus.MATCHED if not missing_slots else MatchStatus.PARTIAL
         if status is MatchStatus.PARTIAL:
             fallback_result = self._resolve_with_fallback(
                 input_text=input_text,
                 norm_text=norm_text,
-                slots=slots,
+                slots=slots or shared_slots,
                 ranked=ranked,
                 missing_slots=missing_slots,
                 base_status=status,
@@ -141,7 +174,7 @@ class TemplateCapabilityEngine:
             trace={
                 "norm_text": norm_text,
                 "selected_template": top.to_dict(),
-                "top_candidates": [candidate.to_dict() for candidate in ranked[:5]],
+                "top_candidates": [candidate.to_dict() for candidate in display_candidates[:5]],
             },
         )
 
@@ -152,7 +185,6 @@ class TemplateCapabilityEngine:
     def _rank_templates(
         self,
         norm_text: str,
-        slots: dict[str, object],
     ) -> list[TemplateCandidate]:
         query_term_set = set(mixed_terms(norm_text))
         lexical_recall = self.lexical_index.search(norm_text, self.config.settings.recall_top_k)
@@ -166,48 +198,22 @@ class TemplateCapabilityEngine:
             [lexical_recall, vector_recall, sample_recall],
             rrf_k=self.config.settings.fusion_rrf_k,
         )
-        rerank_weights = adaptive_score_weights(self.config.settings.weights, slots)
         candidate_ids = set(lexical_scores) | set(vector_scores) | set(sample_scores) | set(fusion_scores)
         ranked: list[TemplateCandidate] = []
 
         for template_id in candidate_ids:
-            template = self.templates[template_id]
-            lexical_score = lexical_scores.get(template_id, 0.0)
-            sample_score = sample_scores.get(template_id, 0.0)
-            vector_score = vector_scores.get(template_id, 0.0)
-            fusion_score = fusion_scores.get(template_id, 0.0)
-            slot_score = slot_fit_score(template, slots)
-            constraint = constraint_score(template, norm_text, slots)
-            structure_score = structural_alignment_score(template, slots)
-            if has_negative_term(template, norm_text):
-                total = 0.0
-            else:
-                total = weighted_score(
-                    {
-                        "lexical": lexical_score,
-                        "sample": sample_score,
-                        "vector": vector_score,
-                        "fusion": fusion_score,
-                        "slot_fit": slot_score,
-                        "constraint": constraint,
-                        "structure": structure_score,
-                    },
-                    rerank_weights,
-                )
+            slots = self.extract_slots(template_id, norm_text)
+            rerank_weights = adaptive_score_weights(self.config.settings.weights, slots)
             ranked.append(
-                TemplateCandidate(
-                    template_id=template.template_id,
-                    query_mode=template.query_mode,
-                    score=total,
-                    lexical_score=lexical_score,
-                    sample_score=sample_score,
-                    vector_score=vector_score,
-                    fusion_score=fusion_score,
-                    slot_fit_score=slot_score,
-                    constraint_score=constraint,
-                    structure_score=structure_score,
-                    missing_slots=missing_required_slots(template, slots),
-                    metadata=template.metadata,
+                self._build_candidate(
+                    template_id=template_id,
+                    norm_text=norm_text,
+                    lexical_score=lexical_scores.get(template_id, 0.0),
+                    sample_score=sample_scores.get(template_id, 0.0),
+                    vector_score=vector_scores.get(template_id, 0.0),
+                    fusion_score=fusion_scores.get(template_id, 0.0),
+                    slots=slots,
+                    weights=rerank_weights,
                 )
             )
 
@@ -238,6 +244,85 @@ class TemplateCapabilityEngine:
         scored.sort(key=lambda item: item[1], reverse=True)
         return scored[: self.config.settings.recall_top_k]
 
+    def extract_slots(self, template_id: str, text: str) -> dict[str, object]:
+        return self.template_slot_registries[template_id].extract(text)
+
+    def _build_template_slot_definitions(
+        self,
+        template: TemplateDefinition,
+    ) -> dict[str, SlotExtractorDefinition]:
+        relevant_slots = (
+            set(template.required_slots)
+            | set(template.optional_slots)
+            | set(template.slot_constraints)
+            | set(template.slot_extractors)
+        )
+        merged: dict[str, SlotExtractorDefinition] = {}
+        for slot_name in relevant_slots:
+            local_definition = template.slot_extractors.get(slot_name)
+            if local_definition is not None:
+                merged[slot_name] = SlotExtractorDefinition(
+                    slot_name=local_definition.slot_name,
+                    extractors=[copy.deepcopy(extractor) for extractor in local_definition.extractors],
+                )
+                continue
+            shared_definition = self.config.slot_extractors.get(slot_name)
+            if shared_definition is None:
+                continue
+            merged[slot_name] = SlotExtractorDefinition(
+                slot_name=shared_definition.slot_name,
+                extractors=[copy.deepcopy(extractor) for extractor in shared_definition.extractors],
+            )
+        return merged
+
+    def _build_candidate(
+        self,
+        *,
+        template_id: str,
+        norm_text: str,
+        lexical_score: float,
+        sample_score: float,
+        vector_score: float,
+        fusion_score: float,
+        slots: dict[str, object],
+        weights: dict[str, float],
+    ) -> TemplateCandidate:
+        template = self.templates[template_id]
+        slot_score = slot_fit_score(template, slots)
+        constraint = constraint_score(template, norm_text, slots)
+        structure_score = structural_alignment_score(template, slots)
+        if has_negative_term(template, norm_text):
+            total = 0.0
+        else:
+            total = weighted_score(
+                {
+                    "lexical": lexical_score,
+                    "sample": sample_score,
+                    "vector": vector_score,
+                    "fusion": fusion_score,
+                    "slot_fit": slot_score,
+                    "constraint": constraint,
+                    "structure": structure_score,
+                },
+                weights,
+            )
+        return TemplateCandidate(
+            template_id=template.template_id,
+            query_mode=template.query_mode,
+            score=total,
+            lexical_score=lexical_score,
+            sample_score=sample_score,
+            vector_score=vector_score,
+            fusion_score=fusion_score,
+            slot_fit_score=slot_score,
+            constraint_score=constraint,
+            structure_score=structure_score,
+            slots=dict(slots),
+            missing_slots=missing_required_slots(template, slots),
+            trace={},
+            metadata=template.metadata,
+        )
+
     def _is_ambiguous(
         self,
         top: TemplateCandidate,
@@ -255,6 +340,86 @@ class TemplateCapabilityEngine:
             if lowered and lowered in norm_text:
                 return term
         return None
+
+    def _resolve_template_slots_with_fallback(
+        self,
+        *,
+        input_text: str,
+        norm_text: str,
+        candidate: TemplateCandidate,
+        status: MatchStatus,
+    ) -> TemplateCandidate:
+        template = self.templates[candidate.template_id]
+        missing_slots = missing_required_slots(template, candidate.slots)
+        if not self._should_use_template_slot_fallback(candidate, missing_slots, status):
+            return candidate
+        if self.llm_template_slot_resolver is None:
+            return candidate
+        suggestion = self.llm_template_slot_resolver.resolve_slots(
+            input_text=input_text,
+            normalized_text=norm_text,
+            template=template,
+            current_slots=dict(candidate.slots),
+            missing_slots=missing_slots,
+        )
+        if suggestion is None or not suggestion.slots:
+            return candidate
+        merged_slots = dict(candidate.slots)
+        merged_slots.update(suggestion.slots)
+        rerank_weights = adaptive_score_weights(self.config.settings.weights, merged_slots)
+        enriched = self._build_candidate(
+            template_id=candidate.template_id,
+            norm_text=norm_text,
+            lexical_score=candidate.lexical_score,
+            sample_score=candidate.sample_score,
+            vector_score=candidate.vector_score,
+            fusion_score=candidate.fusion_score,
+            slots=merged_slots,
+            weights=rerank_weights,
+        )
+        return TemplateCandidate(
+            template_id=enriched.template_id,
+            query_mode=enriched.query_mode,
+            score=enriched.score,
+            lexical_score=enriched.lexical_score,
+            sample_score=enriched.sample_score,
+            vector_score=enriched.vector_score,
+            fusion_score=enriched.fusion_score,
+            slot_fit_score=enriched.slot_fit_score,
+            constraint_score=enriched.constraint_score,
+            structure_score=enriched.structure_score,
+            slots=enriched.slots,
+            missing_slots=enriched.missing_slots,
+            trace={
+                **enriched.trace,
+                "slot_fallback_used": True,
+                "slot_fallback_trace": suggestion.trace,
+            },
+            metadata=enriched.metadata,
+        )
+
+    def _should_use_template_slot_fallback(
+        self,
+        candidate: TemplateCandidate,
+        missing_slots: list[str],
+        status: MatchStatus,
+    ) -> bool:
+        if not self.config.settings.llm_slot_fallback_enabled:
+            return False
+        template = self.templates[candidate.template_id]
+        template_settings = template.llm_slot_extraction
+        if not template_settings.get("enabled", False):
+            return False
+        if candidate.score < self.config.settings.llm_slot_fallback_min_score:
+            return False
+        if status is MatchStatus.MATCHED:
+            return bool(
+                self.config.settings.llm_slot_fallback_allow_on_matched
+                or template_settings.get("allow_on_matched", False)
+            )
+        if status is not MatchStatus.PARTIAL:
+            return False
+        return len(missing_slots) <= self.config.settings.llm_slot_fallback_max_missing_slots
 
     def _resolve_with_fallback(
         self,

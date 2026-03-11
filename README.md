@@ -33,17 +33,20 @@
 整体链路：
 
 1. `normalize_text`：文本标准化
-2. `slot_registry.extract`：配置驱动槽位抽取
+2. 文本召回候选模板，不做全局统一提参
 3. `BM25F` + `char ngram` + `vector search`：多路候选召回
-4. `RRF` + 动态权重重排：融合多路召回，按 query 复杂度调权
-5. `slot_fit` + `constraint` + `structure_score`：模板约束和结构校验
-6. 阈值和歧义判断：输出 `matched / partial / unmatched`
+4. 命中候选后，按模板自己的 `slot_extractors` 做模板内提参
+5. `RRF` + 动态权重重排：融合多路召回，按 query 复杂度调权
+6. `slot_fit` + `constraint` + `structure_score`：模板约束和结构校验
+7. 可选模板级 LLM 补参：只在已命中模板上窄触发
+8. 阈值和歧义判断：输出 `matched / partial / unmatched`
 
 设计原则：
 
 - 模板定义和槽位定义都配置化
+- 参数抽取默认下沉到模板，不依赖全局统一参数字典
 - 匹配支持提参、语序变化、口语化表达
-- 大模型默认不进入主链路；只支持窄触发兜底
+- 大模型默认不进入主链路；只支持命中后的模板级窄触发补参
 - 向量后端可替换，默认按 `512` 维接口设计
 - 模板扩展后必须可批量评测
 
@@ -168,16 +171,20 @@ python -m pytest -q
 - `vector.dimension`：向量维度，当前按 `512` 设计
 - `blocked_terms`：全局拦截词，命中后直接 `unmatched`
 - `llm_fallback`：可选兜底开关，默认关闭
+- `llm_slot_fallback`：命中模板后的可选 LLM 补参开关，默认关闭
 
 建议：
 
 - `match_threshold` 不要太低，否则误匹配会明显增加
 - `blocked_terms` 主要放非问数意图词，如 `报告 / 分析 / 根因 / 预测`
 - `llm_fallback` 只建议在 `partial` 或接近阈值的 `unmatched` 上窄触发
+- `llm_slot_fallback` 只建议在 top1 模板已稳定命中、但缺少少量关键参数时触发
 
 ### slot_extractors
 
-槽位抽取完全配置驱动。当前内置两类抽取器：
+根级 `slot_extractors` 现在主要用于兼容旧配置；主路径推荐把参数抽取下沉到每个模板的 `slot_extractors`。
+
+槽位抽取内置两类抽取器：
 
 - `keyword_value`
 - `regex`
@@ -196,30 +203,32 @@ python -m pytest -q
 - 数字类参数
 - 格式稳定的标识
 
-`keyword_value` 示例：
+模板内 `keyword_value` 示例：
 
 ```json
 {
-  "time_range": {
-    "extractors": [
-      {
-        "type": "keyword_value",
-        "cases": [
-          {
-            "terms": ["近24小时", "过去24小时", "24小时内"],
-            "value": {
-              "mode": "relative",
-              "preset": "last_24h"
+  "slot_extractors": {
+    "time_range": {
+      "extractors": [
+        {
+          "type": "keyword_value",
+          "cases": [
+            {
+              "terms": ["近24小时", "过去24小时", "24小时内"],
+              "value": {
+                "mode": "relative",
+                "preset": "last_24h"
+              }
             }
-          }
-        ]
-      }
-    ]
+          ]
+        }
+      ]
+    }
   }
 }
 ```
 
-`regex` 示例：
+模板内 `regex` 示例：
 
 ```json
 {
@@ -255,6 +264,8 @@ python -m pytest -q
 - `must_terms`：必须出现的语义组；每组任一词命中即可
 - `negative_terms`：模板级负向词
 - `slot_constraints`：槽位约束
+- `slot_extractors`：该模板自己的参数抽取规则
+- `llm_slot_extraction`：该模板的可选 LLM 补参配置
 - `metadata`：业务透传字段
 
 模板示例：
@@ -281,6 +292,11 @@ python -m pytest -q
     "metric": ["offline_count"],
     "query_operator": ["count"]
   },
+  "slot_extractors": {
+    "time_range": {
+      "extractors": []
+    }
+  },
   "metadata": {
     "metric_code": "device_offline_count"
   }
@@ -294,11 +310,13 @@ python -m pytest -q
 1. `BM25F` 多字段词法召回
 2. `char ngram` 样本相似度
 3. `vector search` 向量召回
-4. `RRF` 融合多路召回排名
-5. 动态权重重排
-6. `slot_fit_score` 槽位覆盖度
-7. `constraint_score` 模板约束得分
-8. `structure_score` 结构一致性得分
+4. 命中候选后，按模板本地 extractor 抽参
+5. `RRF` 融合多路召回排名
+6. 动态权重重排
+7. `slot_fit_score` 槽位覆盖度
+8. `constraint_score` 模板约束得分
+9. `structure_score` 结构一致性得分
+10. 可选模板级 LLM 补参
 
 最终分数：
 
@@ -367,7 +385,7 @@ class VectorSearchBackend(Protocol):
 推荐顺序：
 
 1. 在 [templates.json](D:/GitHub/chat_pre_check_blank/configs/templates.json) 添加模板定义
-2. 确认所需槽位已有 extractor；没有就补到 `slot_extractors`
+2. 直接在该模板下定义 `slot_extractors`
 3. 给模板补 `matched / partial / unmatched` 样本
 4. 运行批量评测
 5. 根据失败样本调模板和阈值
@@ -386,6 +404,7 @@ class VectorSearchBackend(Protocol):
 - 不要把具体区域、指标、协议硬编码回 Python
 - 不要把模板追问文案混入能力层
 - 不要为了一个模板改全局逻辑
+- 不要先做全局通用抽参，再去套模板；优先按模板内规则抽参
 
 ### 调权重和阈值
 
@@ -454,13 +473,24 @@ python tools/evaluate_matcher.py --fail-on-errors
 
 LLM 默认只用于离线造测试样本，不用于在线匹配主链路。
 
-如果需要在线兜底，当前代码也支持可选 fallback 钩子，但建议遵守以下约束：
+如果需要在线兜底，当前代码支持两类 LLM 钩子：
+
+1. `llm_fallback`：模板选择兜底
+2. `llm_slot_fallback`：模板已命中后的定向补参
+
+模板级补参更适合你当前这种“参数定义强依赖模板”的场景。
+
+在线使用时建议遵守以下约束：
 
 1. 默认关闭
 2. 只在 `partial` 或接近阈值的 `unmatched` 上触发
 3. 只看前 `N` 个候选模板，不做全量模板推断
 4. 优先用于补关键槽位或在 top 候选里做裁决
 5. 不要覆盖 `blocked_terms` 命中的 query
+
+当前已提供一个兼容 OpenAI 协议的模板级补参实现：
+
+- [fallback.py](D:/GitHub/chat_pre_check_blank/src/template_capability/fallback.py) 里的 `OpenAICompatibleTemplateSlotResolver`
 
 脚本在 [generate_eval_corpus.py](D:/GitHub/chat_pre_check_blank/tools/generate_eval_corpus.py)。
 

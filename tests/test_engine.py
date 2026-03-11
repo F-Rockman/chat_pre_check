@@ -38,7 +38,8 @@ def test_match_device_cpu_memory_over_list_template():
     assert payload["slots"]["memory_threshold"] == 70.0
     assert payload["trace"]["top_candidates"][0]["template_id"] == "device.cpu.memory.over.list"
     assert payload["trace"]["top_candidates"][0]["score"] > payload["trace"]["top_candidates"][1]["score"]
-    assert payload["trace"]["top_candidates"][0]["structure_score"] > payload["trace"]["top_candidates"][1]["structure_score"]
+    assert "memory_threshold" in payload["trace"]["top_candidates"][0]["slots"]
+    assert "memory_threshold" not in payload["trace"]["top_candidates"][1]["slots"]
 
 
 def test_match_device_cpu_memory_disk_over_list_template():
