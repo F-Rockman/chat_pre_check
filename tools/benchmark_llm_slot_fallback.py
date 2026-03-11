@@ -7,6 +7,7 @@ import sys
 import time
 from pathlib import Path
 
+# 允许直接执行 benchmark 脚本，无需先安装当前包。
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
 if str(SRC) not in sys.path:
@@ -19,6 +20,8 @@ from template_capability.fallback import OpenAICompatibleTemplateSlotResolver
 
 DEFAULT_BASE_URL = "https://coding.dashscope.aliyuncs.com/v1"
 DEFAULT_MODEL = "qwen3-coder-plus"
+# 这些 case 专门挑“规则链路容易漏参，但模板其实已经比较明确”的问法，
+# 用来衡量模板级 LLM 补参到底带来多少净收益。
 DEFAULT_CASES = [
     {
         "text": "近24小时接口错误包告警前十",
@@ -44,6 +47,7 @@ DEFAULT_CASES = [
 
 
 def parse_args() -> argparse.Namespace:
+    """定义 benchmark 脚本参数。"""
     parser = argparse.ArgumentParser(description="Benchmark template-level LLM slot fallback.")
     parser.add_argument("--config", default="configs/templates.json")
     parser.add_argument("--base-url", default=os.environ.get("DASHSCOPE_BASE_URL", DEFAULT_BASE_URL))
@@ -62,8 +66,10 @@ def build_engines(
     model: str,
     timeout: float,
 ) -> tuple[TemplateCapabilityEngine, TemplateCapabilityEngine]:
+    """同时构建 baseline 和带模板级 LLM 补参的两套引擎。"""
     baseline_config = load_template_config(config_path)
     llm_config = load_template_config(config_path)
+    # benchmark 只比较“是否开启模板级补参”，其余配置保持一致。
     llm_config.settings.llm_slot_fallback_enabled = True
     resolver = OpenAICompatibleTemplateSlotResolver(
         api_key=api_key,
@@ -78,6 +84,7 @@ def build_engines(
 
 
 def run_case(engine: TemplateCapabilityEngine, text: str) -> tuple[dict[str, object], float]:
+    """执行单条 benchmark case，并记录整次 match 的墙钟耗时。"""
     start = time.perf_counter()
     payload = engine.match(text).to_dict()
     elapsed_ms = (time.perf_counter() - start) * 1000.0
@@ -85,6 +92,7 @@ def run_case(engine: TemplateCapabilityEngine, text: str) -> tuple[dict[str, obj
 
 
 def main() -> None:
+    """Benchmark 主入口。"""
     args = parse_args()
     api_key = os.environ.get("DASHSCOPE_API_KEY")
     if not api_key:
@@ -107,6 +115,7 @@ def main() -> None:
     for case in DEFAULT_CASES:
         baseline_payload, baseline_wall_ms = run_case(baseline_engine, case["text"])
         llm_payload, llm_wall_ms = run_case(llm_engine, case["text"])
+        # 模板级补参的真实耗时记录在 selected_template.trace.slot_fallback_trace 里。
         trace = llm_payload.get("trace", {})
         selected = trace.get("selected_template", {})
         selected_trace = selected.get("trace", {}) if isinstance(selected, dict) else {}
@@ -127,6 +136,7 @@ def main() -> None:
             llm_improved += 1
         if llm_elapsed_ms > 0:
             llm_elapsed_values.append(llm_elapsed_ms)
+        # wall time 包含规则匹配 + 可能发生的 LLM 调用，反映真实端到端成本。
         wall_elapsed_values.append(llm_wall_ms)
         rows.append(
             {
@@ -148,6 +158,8 @@ def main() -> None:
             }
         )
 
+    # avg_llm_elapsed_ms 看的是纯 LLM 请求耗时；
+    # avg_wall_ms 看的是完整请求端到端耗时，两者要分开理解。
     summary = {
         "case_count": len(DEFAULT_CASES),
         "baseline_matched": baseline_matched,
@@ -162,6 +174,7 @@ def main() -> None:
     if args.output:
         output_path = Path(args.output)
         output_path.parent.mkdir(parents=True, exist_ok=True)
+        # benchmark 报告统一落盘 JSON，方便后续发布到 reports/。
         output_path.write_text(
             json.dumps(report, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
@@ -170,6 +183,7 @@ def main() -> None:
         print(json.dumps(report, ensure_ascii=False, indent=2))
         return
 
+    # 默认打印文本摘要 + 明细，适合手工对比 baseline 和 with_llm 的差异。
     print("Summary")
     for key, value in summary.items():
         print(f"{key}: {value}")
