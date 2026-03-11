@@ -158,6 +158,7 @@ python -m pytest -q
 如果你要自己新增模板，优先看单独的模板编写文档：
 
 - [template_authoring_guide.md](D:/GitHub/chat_pre_check_blank/docs/template_authoring_guide.md)
+- [slot_extractors_authoring_guide.md](D:/GitHub/chat_pre_check_blank/docs/slot_extractors_authoring_guide.md)
 
 顶层结构：
 

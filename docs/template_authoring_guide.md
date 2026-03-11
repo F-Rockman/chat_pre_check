@@ -6,6 +6,10 @@
 
 它不是代码说明，也不是运行说明。它是模板配置规范。
 
+如果你当前卡在“参数到底怎么抽、regex 怎么写、哪些参数该交给模板级 LLM”，直接看配套文档：
+
+- [slot_extractors_authoring_guide.md](D:/GitHub/chat_pre_check_blank/docs/slot_extractors_authoring_guide.md)
+
 ## 适用范围
 
 当前工程只支持“问数”场景，所以模板设计也只围绕以下几类 query：
