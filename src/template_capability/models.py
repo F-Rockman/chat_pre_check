@@ -5,65 +5,103 @@ from enum import Enum
 from typing import Any
 
 
-class DecisionType(str, Enum):
-    """独立模板工程只需要三类出口。"""
+class MatchStatus(str, Enum):
+    """模板匹配只区分命中、部分命中、未命中。"""
 
-    ROUTE_TEMPLATE = "route_template"
-    CLARIFY = "clarify"
-    REFUSE = "refuse"
+    MATCHED = "matched"
+    PARTIAL = "partial"
+    UNMATCHED = "unmatched"
 
 
 @dataclass(slots=True)
-class ActionOption:
-    """返回给调用方的补参或替代建议。"""
+class MatcherSettings:
+    """匹配引擎运行参数。"""
 
-    label: str
-    preset_slots: dict[str, Any] = field(default_factory=dict)
-    slot_value: Any | None = None
+    match_threshold: float
+    ambiguity_margin: float
+    recall_top_k: int
+    weights: dict[str, float]
+    vector_dimension: int = 512
+    blocked_terms: list[str] = field(default_factory=list)
+    llm_fallback_enabled: bool = False
+    llm_fallback_max_candidates: int = 3
+    llm_fallback_score_margin: float = 0.08
+    llm_fallback_max_missing_slots: int = 2
+
+
+@dataclass(slots=True)
+class SlotExtractorDefinition:
+    """配置驱动的槽位抽取定义。"""
+
+    slot_name: str
+    extractors: list[dict[str, Any]]
 
 
 @dataclass(slots=True)
 class TemplateDefinition:
-    """模板定义，来自外部 JSON 配置。"""
+    """只面向问数场景的模板定义。"""
 
-    scene_id: str
     template_id: str
-    label: str
-    keywords: list[str]
-    negative_keywords: list[str]
-    slot_schema: dict[str, list[str]]
-    examples: list[str]
+    query_mode: str
+    description: str
+    utterances: list[str]
+    required_slots: list[str]
+    optional_slots: list[str]
+    must_terms: list[list[str]]
+    negative_terms: list[str]
+    slot_constraints: dict[str, list[Any]]
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
-class RouteDecision:
-    """模板引擎输出。"""
+class TemplateCandidate:
+    """单个模板候选的打分轨迹。"""
 
-    type: DecisionType
-    message: str
-    scene: str | None = None
-    template_id: str | None = None
+    template_id: str
+    query_mode: str
+    score: float
+    lexical_score: float
+    vector_score: float
+    slot_fit_score: float
+    constraint_score: float
+    missing_slots: list[str]
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "template_id": self.template_id,
+            "query_mode": self.query_mode,
+            "score": self.score,
+            "lexical_score": self.lexical_score,
+            "vector_score": self.vector_score,
+            "slot_fit_score": self.slot_fit_score,
+            "constraint_score": self.constraint_score,
+            "missing_slots": self.missing_slots,
+            "metadata": self.metadata,
+        }
+
+
+@dataclass(slots=True)
+class MatchResult:
+    """模板匹配输出。"""
+
+    template_id: str | int
+    status: MatchStatus
+    score: float
+    query_mode: str | None
     slots: dict[str, Any] = field(default_factory=dict)
     missing_slots: list[str] = field(default_factory=list)
-    options: list[ActionOption] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
     trace: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "type": self.type.value,
-            "message": self.message,
-            "scene": self.scene,
             "template_id": self.template_id,
+            "status": self.status.value,
+            "score": self.score,
+            "query_mode": self.query_mode,
             "slots": self.slots,
             "missing_slots": self.missing_slots,
-            "options": [
-                {
-                    "label": item.label,
-                    "preset_slots": item.preset_slots,
-                    "slot_value": item.slot_value,
-                }
-                for item in self.options
-            ],
+            "metadata": self.metadata,
             "trace": self.trace,
         }
-

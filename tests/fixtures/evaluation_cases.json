@@ -1,0 +1,287 @@
+{
+  "matched": [
+    {
+      "text": "过去24小时接口错包告警Top15",
+      "template_id": "alarm.interface.error.topn"
+    },
+    {
+      "text": "近24小时接口错误包告警前20名",
+      "template_id": "alarm.interface.error.topn"
+    },
+    {
+      "text": "最近7天接口错包告警排名前30",
+      "template_id": "alarm.interface.error.topn"
+    },
+    {
+      "text": "华南近7天接口错误包告警Top5",
+      "template_id": "alarm.interface.error.topn"
+    },
+    {
+      "text": "上海近24小时接口错包告警排行前10",
+      "template_id": "alarm.interface.error.topn"
+    },
+    {
+      "text": "24小时内接口错误包告警前10",
+      "template_id": "alarm.interface.error.topn"
+    },
+    {
+      "text": "7天内华东接口错包告警Top25",
+      "template_id": "alarm.interface.error.topn"
+    },
+    {
+      "text": "昨天北京掉线设备数",
+      "template_id": "device.offline.count"
+    },
+    {
+      "text": "今日华北离线设备数量",
+      "template_id": "device.offline.count"
+    },
+    {
+      "text": "近24小时深圳离线设备有多少",
+      "template_id": "device.offline.count"
+    },
+    {
+      "text": "过去7天广州掉线设备数",
+      "template_id": "device.offline.count"
+    },
+    {
+      "text": "今天华东离线设备数量是多少",
+      "template_id": "device.offline.count"
+    },
+    {
+      "text": "昨日华北离线设备总数",
+      "template_id": "device.offline.count"
+    },
+    {
+      "text": "近7天各地区丢包率排名Top8",
+      "template_id": "network.packet_loss.rank.topn"
+    },
+    {
+      "text": "过去24小时地市丢包排行前12",
+      "template_id": "network.packet_loss.rank.topn"
+    },
+    {
+      "text": "昨天区域丢包率Top3",
+      "template_id": "network.packet_loss.rank.topn"
+    },
+    {
+      "text": "最近7天各区域丢包率排行前15",
+      "template_id": "network.packet_loss.rank.topn"
+    },
+    {
+      "text": "华北近24小时地市丢包率排名Top10",
+      "template_id": "network.packet_loss.rank.topn"
+    },
+    {
+      "text": "近7天各区域丢包率Top7",
+      "template_id": "network.packet_loss.rank.topn"
+    },
+    {
+      "text": "今天广州严重告警数量",
+      "template_id": "alarm.critical.count"
+    },
+    {
+      "text": "近7天北京critical告警数",
+      "template_id": "alarm.critical.count"
+    },
+    {
+      "text": "昨日华东严重告警有多少",
+      "template_id": "alarm.critical.count"
+    },
+    {
+      "text": "过去24小时深圳critical告警数量",
+      "template_id": "alarm.critical.count"
+    },
+    {
+      "text": "今天上海严重告警数是多少",
+      "template_id": "alarm.critical.count"
+    },
+    {
+      "text": "查询最近cpu大于80的设备列表",
+      "template_id": "device.cpu.over.list"
+    },
+    {
+      "text": "列出华东cpu超过85的设备",
+      "template_id": "device.cpu.over.list"
+    },
+    {
+      "text": "查询cup大余88的设别列表",
+      "template_id": "device.cpu.over.list"
+    },
+    {
+      "text": "查询最近内存大于75的设备列表",
+      "template_id": "device.memory.over.list"
+    },
+    {
+      "text": "列出华南内存超过70的设备",
+      "template_id": "device.memory.over.list"
+    },
+    {
+      "text": "查询内存使用率超过85的设备名单",
+      "template_id": "device.memory.over.list"
+    },
+    {
+      "text": "查询最近cpu大于80且内存大于70的设备列表",
+      "template_id": "device.cpu.memory.over.list"
+    },
+    {
+      "text": "最近7天上海cpu利用率超过80且内存使用率超过70的设备有哪些",
+      "template_id": "device.cpu.memory.over.list"
+    },
+    {
+      "text": "查询cup大余88且内存大于66的设别列表",
+      "template_id": "device.cpu.memory.over.list"
+    },
+    {
+      "text": "查询近24小时cpu大于80 内存大于70 磁盘大于85的设备列表",
+      "template_id": "device.cpu.memory.disk.over.list"
+    },
+    {
+      "text": "最近cpu高于90 内存高于80 磁盘高于85的设备有哪些",
+      "template_id": "device.cpu.memory.disk.over.list"
+    },
+    {
+      "text": "查询上海近7天cpu利用率大于88 内存利用率大于68 磁盘利用率大于92的设备名单",
+      "template_id": "device.cpu.memory.disk.over.list"
+    }
+  ],
+  "partial": [
+    {
+      "text": "接口错误包告警Top10",
+      "template_id": "alarm.interface.error.topn"
+    },
+    {
+      "text": "近24小时接口错误包告警",
+      "template_id": "alarm.interface.error.topn"
+    },
+    {
+      "text": "过去24小时接口错包告警前",
+      "template_id": "alarm.interface.error.topn"
+    },
+    {
+      "text": "华东离线设备数量",
+      "template_id": "device.offline.count"
+    },
+    {
+      "text": "今天设备离线数",
+      "template_id": "device.offline.count"
+    },
+    {
+      "text": "华东今天离线设备",
+      "template_id": "device.offline.count"
+    },
+    {
+      "text": "各区域丢包率排名Top10",
+      "template_id": "network.packet_loss.rank.topn"
+    },
+    {
+      "text": "近7天丢包率排名",
+      "template_id": "network.packet_loss.rank.topn"
+    },
+    {
+      "text": "近7天区域丢包率Top",
+      "template_id": "network.packet_loss.rank.topn"
+    },
+    {
+      "text": "严重告警数量",
+      "template_id": "alarm.critical.count"
+    },
+    {
+      "text": "今天critical告警",
+      "template_id": "alarm.critical.count"
+    },
+    {
+      "text": "北京严重告警数",
+      "template_id": "alarm.critical.count"
+    },
+    {
+      "text": "查询最近cpu大于80的设备",
+      "template_id": "device.cpu.over.list"
+    },
+    {
+      "text": "查询最近内存大于75的设备",
+      "template_id": "device.memory.over.list"
+    },
+    {
+      "text": "查询最近cpu大于80且内存大于70的设备",
+      "template_id": "device.cpu.memory.over.list"
+    },
+    {
+      "text": "查询近24小时cpu大于80 内存大于70 磁盘大于85的设备",
+      "template_id": "device.cpu.memory.disk.over.list"
+    }
+  ],
+  "unmatched": [
+    {
+      "text": "帮我写一份关于设备离线情况的报告"
+    },
+    {
+      "text": "分析一下最近接口错误包告警的原因"
+    },
+    {
+      "text": "预测明天的告警趋势"
+    },
+    {
+      "text": "总结一下本周的网络问题"
+    },
+    {
+      "text": "找出导致丢包率上升的根本原因"
+    },
+    {
+      "text": "设备频繁掉线的解决方案是什么"
+    },
+    {
+      "text": "为什么接口错误包告警这么多"
+    },
+    {
+      "text": "请提供网络性能优化建议"
+    },
+    {
+      "text": "分析告警数据并给出改进建议"
+    },
+    {
+      "text": "设备离线问题的根因分析"
+    },
+    {
+      "text": "网络丢包问题的详细报告"
+    },
+    {
+      "text": "预测未来一周的告警数量"
+    }
+  ],
+  "not_full_match": [
+    {
+      "text": "接口错误包统计"
+    },
+    {
+      "text": "设备离线情况"
+    },
+    {
+      "text": "告警数量统计"
+    },
+    {
+      "text": "丢包率分析"
+    },
+    {
+      "text": "接口告警排行"
+    },
+    {
+      "text": "设备数量统计"
+    },
+    {
+      "text": "区域排名"
+    },
+    {
+      "text": "严重告警"
+    },
+    {
+      "text": "cpu高的设备列表"
+    },
+    {
+      "text": "内存高的设备"
+    },
+    {
+      "text": "cpu和内存高的设备列表"
+    }
+  ]
+}

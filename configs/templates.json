@@ -1,145 +1,535 @@
 {
-  "match_threshold": 0.55,
-  "weights": {
-    "rule": 0.7,
-    "slot_fit": 0.3
+  "matcher": {
+    "match_threshold": 0.58,
+    "ambiguity_margin": 0.03,
+    "recall_top_k": 30,
+    "weights": {
+      "lexical": 0.45,
+      "vector": 0.25,
+      "slot_fit": 0.2,
+      "constraint": 0.1
+    },
+    "blocked_terms": [
+      "分析",
+      "原因",
+      "根因",
+      "报告",
+      "预测",
+      "总结",
+      "建议",
+      "解决方案",
+      "为什么",
+      "走势",
+      "优化"
+    ],
+    "llm_fallback": {
+      "enabled": false,
+      "max_candidates": 3,
+      "score_margin": 0.08,
+      "max_missing_slots": 2
+    },
+    "vector": {
+      "provider": "hashing",
+      "dimension": 512
+    }
+  },
+  "slot_extractors": {
+    "time_range": {
+      "extractors": [
+        {
+          "type": "keyword_value",
+          "cases": [
+            {
+              "terms": ["近24小时", "过去24小时", "24小时内", "最近24小时"],
+              "value": {
+                "mode": "relative",
+                "preset": "last_24h"
+              }
+            },
+            {
+              "terms": ["近7天", "过去7天", "7天内", "最近7天"],
+              "value": {
+                "mode": "relative",
+                "preset": "last_7d"
+              }
+            },
+            {
+              "terms": ["今天", "今日"],
+              "value": {
+                "mode": "relative",
+                "preset": "today"
+              }
+            },
+            {
+              "terms": ["昨天", "昨日"],
+              "value": {
+                "mode": "relative",
+                "preset": "yesterday"
+              }
+            },
+            {
+              "terms": ["最近"],
+              "value": {
+                "mode": "relative",
+                "preset": "recent"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "topn": {
+      "extractors": [
+        {
+          "type": "regex",
+          "patterns": [
+            {
+              "pattern": "(?:top\\s*|前)\\s*(\\d+)",
+              "group": 1,
+              "value_type": "int",
+              "min": 1,
+              "max": 1000
+            }
+          ]
+        }
+      ]
+    },
+    "region_id": {
+      "extractors": [
+        {
+          "type": "keyword_value",
+          "cases": [
+            {
+              "terms": ["华东"],
+              "value": "east_cn"
+            },
+            {
+              "terms": ["华南"],
+              "value": "south_cn"
+            },
+            {
+              "terms": ["华北"],
+              "value": "north_cn"
+            },
+            {
+              "terms": ["广州"],
+              "value": "region_gz"
+            },
+            {
+              "terms": ["深圳"],
+              "value": "region_sz"
+            },
+            {
+              "terms": ["北京"],
+              "value": "region_bj"
+            },
+            {
+              "terms": ["上海"],
+              "value": "region_sh"
+            }
+          ]
+        }
+      ]
+    },
+    "entity_type": {
+      "extractors": [
+        {
+          "type": "keyword_value",
+          "cases": [
+            {
+              "terms": ["接口"],
+              "value": "interface"
+            },
+            {
+              "terms": ["设备", "设别", "主机"],
+              "value": "device"
+            },
+            {
+              "terms": ["区域", "地市", "地区"],
+              "value": "region"
+            }
+          ]
+        }
+      ]
+    },
+    "metric": {
+      "extractors": [
+        {
+          "type": "keyword_value",
+          "cases": [
+            {
+              "terms": ["错误包", "错包"],
+              "value": "error_packet"
+            },
+            {
+              "terms": ["离线", "掉线"],
+              "value": "offline_count"
+            },
+            {
+              "terms": ["丢包率", "丢包"],
+              "value": "packet_loss"
+            },
+            {
+              "terms": ["告警数", "告警数量", "告警量", "告警"],
+              "value": "alarm_count"
+            },
+            {
+              "terms": ["cpu利用率", "cpu使用率", "cpu", "cup"],
+              "value": "cpu_usage"
+            },
+            {
+              "terms": ["内存利用率", "内存使用率", "内存", "memory"],
+              "value": "memory_usage"
+            },
+            {
+              "terms": ["磁盘利用率", "磁盘使用率", "磁盘", "disk"],
+              "value": "disk_usage"
+            }
+          ]
+        }
+      ]
+    },
+    "query_operator": {
+      "extractors": [
+        {
+          "type": "keyword_value",
+          "cases": [
+            {
+              "terms": ["top", "前", "排名", "排行"],
+              "value": "topn"
+            },
+            {
+              "terms": ["设备列表", "列表", "清单", "列出", "列出来", "哪些设备", "设备有哪些", "设备名单"],
+              "value": "list"
+            },
+            {
+              "terms": ["多少", "有多少", "数量", "数", "总数"],
+              "value": "count"
+            }
+          ]
+        }
+      ]
+    },
+    "severity": {
+      "extractors": [
+        {
+          "type": "keyword_value",
+          "cases": [
+            {
+              "terms": ["严重", "critical"],
+              "value": "critical"
+            },
+            {
+              "terms": ["次严重", "major"],
+              "value": "major"
+            },
+            {
+              "terms": ["一般", "minor"],
+              "value": "minor"
+            }
+          ]
+        }
+      ]
+    },
+    "cpu_threshold": {
+      "extractors": [
+        {
+          "type": "regex",
+          "patterns": [
+            {
+              "pattern": "(?:cpu|cup)(?:利用率|使用率)?\\s*(?:大于|大余|高于|超过|>|>=|不低于)\\s*(\\d+(?:\\.\\d+)?)\\s*%?",
+              "group": 1,
+              "value_type": "float",
+              "min": 0,
+              "max": 100
+            },
+            {
+              "pattern": "(?:大于|大余|高于|超过|>|>=|不低于)\\s*(\\d+(?:\\.\\d+)?)\\s*%?\\s*的?\\s*(?:cpu|cup)(?:利用率|使用率)?",
+              "group": 1,
+              "value_type": "float",
+              "min": 0,
+              "max": 100
+            }
+          ]
+        }
+      ]
+    },
+    "memory_threshold": {
+      "extractors": [
+        {
+          "type": "regex",
+          "patterns": [
+            {
+              "pattern": "内存(?:利用率|使用率)?\\s*(?:大于|大余|高于|超过|>|>=|不低于)\\s*(\\d+(?:\\.\\d+)?)\\s*%?",
+              "group": 1,
+              "value_type": "float",
+              "min": 0,
+              "max": 100
+            },
+            {
+              "pattern": "(?:大于|大余|高于|超过|>|>=|不低于)\\s*(\\d+(?:\\.\\d+)?)\\s*%?\\s*的?\\s*内存(?:利用率|使用率)?",
+              "group": 1,
+              "value_type": "float",
+              "min": 0,
+              "max": 100
+            }
+          ]
+        }
+      ]
+    },
+    "disk_threshold": {
+      "extractors": [
+        {
+          "type": "regex",
+          "patterns": [
+            {
+              "pattern": "(?:磁盘|disk)(?:利用率|使用率)?\\s*(?:大于|大余|高于|超过|>|>=|不低于)\\s*(\\d+(?:\\.\\d+)?)\\s*%?",
+              "group": 1,
+              "value_type": "float",
+              "min": 0,
+              "max": 100
+            },
+            {
+              "pattern": "(?:大于|大余|高于|超过|>|>=|不低于)\\s*(\\d+(?:\\.\\d+)?)\\s*%?\\s*的?\\s*(?:磁盘|disk)(?:利用率|使用率)?",
+              "group": 1,
+              "value_type": "float",
+              "min": 0,
+              "max": 100
+            }
+          ]
+        }
+      ]
+    }
   },
   "templates": [
     {
-      "scene_id": "alarm.query",
-      "template_id": "tpl_alarm_topn",
-      "label": "查近24小时核心网告警Top10",
-      "keywords": ["告警", "top", "核心网", "全网"],
-      "negative_keywords": ["关联率", "相关性"],
-      "slot_schema": {
-        "required": ["object_scope", "time_range", "topn"],
-        "optional": ["severity", "region_id"]
-      },
-      "examples": [
-        "查近24小时核心网告警Top10",
-        "查近24小时全网告警Top20"
-      ]
-    },
-    {
-      "scene_id": "alarm.query",
-      "template_id": "tpl_interface_alarm_topn",
-      "label": "近24小时接口错误包告警Top10",
-      "keywords": ["接口", "错误包", "告警", "top"],
-      "negative_keywords": ["相关性", "关联率", "同比"],
-      "slot_schema": {
-        "required": ["object_scope", "time_range", "topn"],
-        "optional": ["region_id", "severity", "metric"]
-      },
-      "examples": [
+      "template_id": "alarm.interface.error.topn",
+      "query_mode": "metric_query",
+      "description": "查询接口错误包告警排行",
+      "utterances": [
         "近24小时接口错误包告警Top10",
-        "近7天华南接口告警Top20"
-      ]
+        "过去24小时接口错包告警前10名",
+        "华东近7天接口错误包告警Top20",
+        "列出最近24小时接口错误包告警排名前15",
+        "查询上海近24小时接口错包告警top30"
+      ],
+      "required_slots": ["time_range", "topn"],
+      "optional_slots": ["region_id"],
+      "must_terms": [
+        ["接口"],
+        ["错误包", "错包"],
+        ["告警", "告警数", "告警量"],
+        ["top", "前", "排名", "排行"]
+      ],
+      "negative_terms": ["原因", "根因", "总结", "报告", "预测"],
+      "slot_constraints": {
+        "entity_type": ["interface"],
+        "metric": ["error_packet"],
+        "query_operator": ["topn"]
+      },
+      "metadata": {
+        "metric_code": "interface_error_alarm_topn"
+      }
     },
     {
-      "scene_id": "alarm.query",
-      "template_id": "tpl_bgp_flap_topn",
-      "label": "近7天华东BGP flap Top20",
-      "keywords": ["bgp", "抖动", "flap", "top"],
-      "negative_keywords": ["相关性", "关联率"],
-      "slot_schema": {
-        "required": ["time_range", "topn", "protocol"],
-        "optional": ["region_id", "severity"]
-      },
-      "examples": [
-        "近24小时BGP抖动Top10",
-        "近7天华东BGP flap Top20"
-      ]
-    },
-    {
-      "scene_id": "alarm.query",
-      "template_id": "tpl_alarm_count_severity",
-      "label": "今天广州区域严重告警数量",
-      "keywords": ["严重", "告警", "数量"],
-      "negative_keywords": ["top", "关联率"],
-      "slot_schema": {
-        "required": ["time_range", "severity"],
-        "optional": ["region_id", "object_scope"]
-      },
-      "examples": [
-        "今天广州区域严重告警数量",
-        "近7天北京严重告警数"
-      ]
-    },
-    {
-      "scene_id": "alarm.query",
-      "template_id": "tpl_port_alarm_topn",
-      "label": "近24小时端口告警Top5",
-      "keywords": ["端口", "告警", "top"],
-      "negative_keywords": ["相关性", "同比"],
-      "slot_schema": {
-        "required": ["object_scope", "time_range", "topn"],
-        "optional": ["severity"]
-      },
-      "examples": [
-        "近24小时端口告警Top5",
-        "昨天端口告警Top10"
-      ]
-    },
-    {
-      "scene_id": "device.query",
-      "template_id": "tpl_device_cpu_hotspot",
-      "label": "近24小时设备CPU利用率Top10",
-      "keywords": ["cpu", "top", "设备"],
-      "negative_keywords": ["相关性", "关联率"],
-      "slot_schema": {
-        "required": ["time_range", "topn", "metric"],
-        "optional": ["region_id"]
-      },
-      "examples": [
-        "近24小时设备CPU利用率Top10",
-        "今天华北设备CPU Top20"
-      ]
-    },
-    {
-      "scene_id": "device.query",
-      "template_id": "tpl_device_offline_count",
-      "label": "昨天华东离线设备数",
-      "keywords": ["离线", "设备", "数量"],
-      "negative_keywords": ["关联率", "同比"],
-      "slot_schema": {
-        "required": ["region_id", "time_range"],
-        "optional": []
-      },
-      "examples": [
+      "template_id": "device.offline.count",
+      "query_mode": "metric_query",
+      "description": "查询离线设备数量",
+      "utterances": [
         "昨天华东离线设备数",
-        "近24小时广州离线设备数量"
-      ]
+        "近24小时广州离线设备数量",
+        "华北今天掉线设备有多少",
+        "查询最近7天深圳离线设备总数",
+        "统计上海昨天掉线设备数量"
+      ],
+      "required_slots": ["time_range", "region_id", "query_operator"],
+      "optional_slots": [],
+      "must_terms": [
+        ["设备"],
+        ["离线", "掉线"],
+        ["多少", "有多少", "数量", "数", "总数"]
+      ],
+      "negative_terms": ["原因", "根因", "报告", "总结", "预测"],
+      "slot_constraints": {
+        "entity_type": ["device"],
+        "metric": ["offline_count"],
+        "query_operator": ["count"]
+      },
+      "metadata": {
+        "metric_code": "device_offline_count"
+      }
     },
     {
-      "scene_id": "device.query",
-      "template_id": "tpl_alarm_trend_device",
-      "label": "近7天设备10.2.3.4告警趋势",
-      "keywords": ["设备", "告警", "趋势"],
-      "negative_keywords": ["相关性", "关联率"],
-      "slot_schema": {
-        "required": ["device_id", "time_range"],
-        "optional": ["severity"]
-      },
-      "examples": [
-        "近7天设备10.2.3.4告警趋势",
-        "今天设备A告警趋势"
-      ]
-    },
-    {
-      "scene_id": "alarm.analysis",
-      "template_id": "tpl_packet_loss_region_rank",
-      "label": "近7天各区域丢包率排名Top10",
-      "keywords": ["丢包率", "区域", "排名", "top"],
-      "negative_keywords": ["根因", "预测"],
-      "slot_schema": {
-        "required": ["time_range", "metric", "topn"],
-        "optional": ["region_id"]
-      },
-      "examples": [
+      "template_id": "network.packet_loss.rank.topn",
+      "query_mode": "metric_query",
+      "description": "查询区域丢包率排名",
+      "utterances": [
         "近7天各区域丢包率排名Top10",
-        "昨天地市丢包率Top5"
-      ]
+        "昨天地市丢包率Top5",
+        "过去24小时地区丢包排行前10",
+        "查询最近7天各地区丢包率前20名",
+        "列出华东近24小时区域丢包率top8"
+      ],
+      "required_slots": ["time_range", "topn"],
+      "optional_slots": ["region_id"],
+      "must_terms": [
+        ["丢包率", "丢包"],
+        ["top", "前", "排名", "排行"],
+        ["区域", "地市", "地区"]
+      ],
+      "negative_terms": ["原因", "根因", "报告", "总结", "预测"],
+      "slot_constraints": {
+        "entity_type": ["region"],
+        "metric": ["packet_loss"],
+        "query_operator": ["topn"]
+      },
+      "metadata": {
+        "metric_code": "packet_loss_rank_topn"
+      }
+    },
+    {
+      "template_id": "alarm.critical.count",
+      "query_mode": "metric_query",
+      "description": "查询严重告警数量",
+      "utterances": [
+        "今天广州区域严重告警数量",
+        "近7天北京严重告警数",
+        "华东昨天critical告警有多少",
+        "查询最近24小时深圳严重告警总数",
+        "统计昨天华北critical告警数量"
+      ],
+      "required_slots": ["time_range", "severity", "query_operator"],
+      "optional_slots": ["region_id"],
+      "must_terms": [
+        ["告警", "告警数", "告警数量"],
+        ["严重", "critical"],
+        ["多少", "有多少", "数量", "数", "总数"]
+      ],
+      "negative_terms": ["原因", "根因", "报告", "总结", "预测"],
+      "slot_constraints": {
+        "metric": ["alarm_count"],
+        "severity": ["critical"],
+        "query_operator": ["count"]
+      },
+      "metadata": {
+        "metric_code": "critical_alarm_count"
+      }
+    },
+    {
+      "template_id": "device.cpu.over.list",
+      "query_mode": "metric_query",
+      "description": "查询CPU利用率超过阈值的设备列表",
+      "utterances": [
+        "查询最近cpu大于80的设备列表",
+        "近24小时cpu高于90的设备清单",
+        "列出华东cpu超过85的设备",
+        "最近7天上海cpu利用率大于70的设备有哪些",
+        "查询cup大余88的设别列表"
+      ],
+      "required_slots": ["query_operator", "cpu_threshold"],
+      "optional_slots": ["time_range", "region_id"],
+      "must_terms": [
+        ["设备", "设别", "主机"],
+        ["cpu", "cup"],
+        ["大于", "大余", "高于", "超过", ">", ">=", "不低于"],
+        ["列表", "清单", "列出", "哪些设备", "设备有哪些", "设备名单"]
+      ],
+      "negative_terms": ["原因", "根因", "总结", "报告", "预测"],
+      "slot_constraints": {
+        "entity_type": ["device"],
+        "metric": ["cpu_usage"],
+        "query_operator": ["list"]
+      },
+      "metadata": {
+        "metric_code": "device_cpu_over_list"
+      }
+    },
+    {
+      "template_id": "device.memory.over.list",
+      "query_mode": "metric_query",
+      "description": "查询内存利用率超过阈值的设备列表",
+      "utterances": [
+        "查询最近内存大于75的设备列表",
+        "近24小时内存高于80的设备清单",
+        "列出华南内存超过70的设备",
+        "最近7天北京内存利用率大于65的设备有哪些",
+        "查询内存使用率超过85的设备名单"
+      ],
+      "required_slots": ["query_operator", "memory_threshold"],
+      "optional_slots": ["time_range", "region_id"],
+      "must_terms": [
+        ["设备", "设别", "主机"],
+        ["内存", "memory"],
+        ["大于", "大余", "高于", "超过", ">", ">=", "不低于"],
+        ["列表", "清单", "列出", "哪些设备", "设备有哪些", "设备名单"]
+      ],
+      "negative_terms": ["原因", "根因", "总结", "报告", "预测"],
+      "slot_constraints": {
+        "entity_type": ["device"],
+        "metric": ["memory_usage"],
+        "query_operator": ["list"]
+      },
+      "metadata": {
+        "metric_code": "device_memory_over_list"
+      }
+    },
+    {
+      "template_id": "device.cpu.memory.over.list",
+      "query_mode": "metric_query",
+      "description": "查询CPU和内存同时超过阈值的设备列表",
+      "utterances": [
+        "查询最近cpu大于80且内存大于70的设备列表",
+        "近24小时cpu超过85并且内存高于75的设备清单",
+        "列出华东cpu大于90 内存大于80的设备",
+        "最近7天上海cpu利用率超过80且内存使用率超过70的设备有哪些",
+        "查询cup大余88且内存大于66的设别列表"
+      ],
+      "required_slots": ["query_operator", "cpu_threshold", "memory_threshold"],
+      "optional_slots": ["time_range", "region_id"],
+      "must_terms": [
+        ["设备", "设别", "主机"],
+        ["cpu", "cup"],
+        ["内存", "memory"],
+        ["大于", "大余", "高于", "超过", ">", ">=", "不低于"],
+        ["列表", "清单", "列出", "哪些设备", "设备有哪些", "设备名单"]
+      ],
+      "negative_terms": ["原因", "根因", "总结", "报告", "预测"],
+      "slot_constraints": {
+        "entity_type": ["device"],
+        "query_operator": ["list"]
+      },
+      "metadata": {
+        "metric_code": "device_cpu_memory_over_list"
+      }
+    },
+    {
+      "template_id": "device.cpu.memory.disk.over.list",
+      "query_mode": "metric_query",
+      "description": "查询CPU、内存和磁盘同时超过阈值的设备列表",
+      "utterances": [
+        "查询近24小时cpu大于80 内存大于70 磁盘大于85的设备列表",
+        "列出华南cpu超过75且内存超过70且磁盘使用率超过80的设备清单",
+        "最近cpu高于90 内存高于80 磁盘高于85的设备有哪些",
+        "查询上海近7天cpu利用率大于88 内存利用率大于68 磁盘利用率大于92的设备名单"
+      ],
+      "required_slots": ["query_operator", "cpu_threshold", "memory_threshold", "disk_threshold"],
+      "optional_slots": ["time_range", "region_id"],
+      "must_terms": [
+        ["设备", "设别", "主机"],
+        ["cpu", "cup"],
+        ["内存", "memory"],
+        ["磁盘", "disk"],
+        ["大于", "大余", "高于", "超过", ">", ">=", "不低于"],
+        ["列表", "清单", "列出", "哪些设备", "设备有哪些", "设备名单"]
+      ],
+      "negative_terms": ["原因", "根因", "总结", "报告", "预测"],
+      "slot_constraints": {
+        "entity_type": ["device"],
+        "query_operator": ["list"]
+      },
+      "metadata": {
+        "metric_code": "device_cpu_memory_disk_over_list"
+      }
     }
   ]
 }
-
