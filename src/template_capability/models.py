@@ -115,7 +115,10 @@ class TemplateDefinition:
 
     # 模板唯一标识，也是最终返回给外部系统的主键。
     template_id: str
-    # 模板结果类型，例如 count / topn / list；它是问法产物，不是召回条件。
+    # 模板所属的“能力大类”。
+    # 在当前工程里它基本固定为 `metric_query`，用于告诉下游：
+    # 这是一个问数模板，而不是报告、分析、动作等别的能力类型。
+    # 真正区分 `count / topn / list` 的不是它，而是槽位里的 `query_operator`。
     query_mode: str
     # 供开发和召回理解使用的简短说明，适合写“这个模板到底问什么”。
     description: str
@@ -203,7 +206,7 @@ class MatchResult:
     status: MatchStatus
     # 这里是最终对外分数，已经是融合后的 top1 分。
     score: float
-    # 模板声明的查询模式；未命中时为 None。
+    # 模板声明的能力大类；当前一般是 `metric_query`，未命中时为 None。
     query_mode: str | None
     # 最终确认可用的槽位集合。
     slots: dict[str, Any] = field(default_factory=dict)

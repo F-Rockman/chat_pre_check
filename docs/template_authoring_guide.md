@@ -184,7 +184,7 @@
 
 作用：
 
-- 标记模板类型
+- 标记模板所属的能力大类
 
 当前建议：
 
@@ -193,6 +193,19 @@
 除非：
 
 - 你后面明确在代码里扩过新的 query mode
+
+重点：
+
+- `query_mode` 不是 `count / topn / list`
+- 在当前工程里，它主要回答“这是不是问数模板”
+- 真正区分查询形态的是 `query_operator`
+
+也就是说：
+
+- `query_mode = metric_query`
+  表示这是问数能力
+- `query_operator = count / topn / list`
+  表示这条模板最终是问数量、问排行还是问列表
 
 ### `description`
 

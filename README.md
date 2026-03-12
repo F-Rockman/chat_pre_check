@@ -145,7 +145,9 @@ python -m pytest -q
 - `template_id`：命中的模板；未命中时为 `-1`
 - `status`：`matched / partial / unmatched`
 - `score`：最终融合分
-- `query_mode`：当前模板类型，当前主要是 `metric_query`
+- `query_mode`：模板所属能力大类，当前基本固定是 `metric_query`
+  它回答的是“这是问数模板还是别的大类模板”
+  它不负责区分 `count / topn / list`
 - `slots`：抽出的槽位
 - `missing_slots`：`partial` 时缺失的必填槽位
 - `metadata`：模板透传字段
@@ -330,7 +332,7 @@ python -m pytest -q
 模板字段：
 
 - `template_id`：唯一标识
-- `query_mode`：模板类型
+- `query_mode`：模板所属能力大类
 - `description`：模板说明
 - `utterances`：示例表达，用于召回和相似度
 - `required_slots`：必填槽位
@@ -344,6 +346,11 @@ python -m pytest -q
 
 重点字段解释：
 
+- `query_mode`
+  这是粗粒度能力分类
+  在当前工程里通常固定写 `metric_query`
+  它的作用主要是告诉下游“这是问数模板”
+  不要把它当成 `count / topn / list` 这类查询形态字段
 - `must_terms`
   这是模板的语义锚点
   每组里命中任意一个词就算该组通过
@@ -351,6 +358,10 @@ python -m pytest -q
 - `slot_constraints`
   用来限制抽出来的槽位值必须落在模板允许范围内
   比如 `query_operator` 必须是 `list`，或者 `severity` 必须是 `critical`
+- `query_operator`
+  这是细粒度查询形态
+  真正区分“问数量 / 问排行 / 问列表”的是它
+  所以在问数场景里，它通常比 `query_mode` 更重要
 - `slot_extractors`
   当前推荐的参数定义位置
   模板需要什么参数，就在模板内定义什么参数
@@ -726,6 +737,18 @@ python -m pytest -q tests/test_live_llm_slot_fallback.py
 ### 为什么要把 `query_operator` 当作必填槽位
 
 这是为了把“看指标”与“问数量/问排行”区分开。否则很多非问数 query 会被错误当成完整命中。
+
+### `query_mode` 和 `query_operator` 有什么区别
+
+- `query_mode` 是能力大类
+  例如当前仓库里基本都是 `metric_query`
+- `query_operator` 是问法形态
+  例如 `count / topn / list`
+
+在你当前这个只做问数的项目里：
+
+- `query_mode` 更多是对外透传的保留字段
+- `query_operator` 才是真正影响模板区分和查询执行形态的关键槽位
 
 ## 当前状态
 
