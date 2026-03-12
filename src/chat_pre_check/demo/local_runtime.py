@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import re
 from typing import Any
 
@@ -35,6 +36,7 @@ class LocalHeuristicRetriever:
         self.scene_ids = {scene.get("scene_id") for scene in scenes}
 
     def search_scene(self, query_text: str, topk: int = 5) -> list[SearchHit]:
+        # 高频 demo 问法先走规则捷径，保证本地 fallback 结果稳定且易调试。
         hinted = self._pattern_scene_hits(query_text, topk=topk)
         if hinted:
             return hinted
@@ -143,6 +145,7 @@ class LocalHeuristicRetriever:
         return self._topk(scored, topk)
 
     def search_seed_cases(self, query_text: str, topk: int = 5) -> list[SearchHit]:
+        # seed 召回只服务于能力边界守卫/推荐，因此本地模式下保持宽松即可。
         scored: list[SearchHit] = []
         for case in self.seed_cases:
             case_id = case["case_id"]
@@ -222,6 +225,7 @@ class LocalRegionResolver:
 def build_local_fallback_engine(config_dir: str = "configs"):
     """构建纯本地可运行引擎（无 ES/OS 依赖）。"""
     config = load_app_config(config_dir)
+    # 继续复用正式配置编译结果，确保本地 fallback 与 live 模式共享同一套能力定义。
     retriever = LocalHeuristicRetriever(
         scenes=config.scenes,
         templates=config.templates,

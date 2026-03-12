@@ -19,6 +19,7 @@ class EntityExtractorMiddleware:
         started = time.perf_counter()
         entities = extract_entities(ctx.norm_text, timezone=self.default_timezone)
         ctx.entities.update(entities)
+        # 规则抽取的高置信轻量实体可直接落入 slots，供后续场景/模板判定复用。
         self._merge_slots(ctx, entities)
         elapsed = (time.perf_counter() - started) * 1000
         ctx.trace.add_step(

@@ -32,6 +32,7 @@ class EntityEnricherMiddleware:
 
     def process(self, ctx: RequestContext) -> RouteDecision | None:
         started = time.perf_counter()
+        # 若 AC 预提参已给出候选，可按配置跳过远程 resolver，降低时延与依赖风险。
         prefilled_device = self._normalize_candidates(ctx.entities.get("device_candidates", []))
         prefilled_region = self._normalize_candidates(ctx.entities.get("region_candidates", []))
 
@@ -77,6 +78,7 @@ class EntityEnricherMiddleware:
 
         ctx.entities["device_candidates"] = device_candidates
         ctx.entities["region_candidates"] = region_candidates
+        # resolver 只在高置信时自动落槽，其余情况交给追问或模板校验。
         self._commit_slot("device_id", device_candidates, ctx)
         self._commit_slot("region_id", region_candidates, ctx)
 

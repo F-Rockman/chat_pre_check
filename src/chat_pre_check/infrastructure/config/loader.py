@@ -111,6 +111,7 @@ def _compile_capabilities(
             }
         )
 
+        # intents 是当前主事实源；legacy templates/seed_cases 仅用于兼容旧配置。
         (
             intent_templates,
             intent_seed_cases,
@@ -145,6 +146,7 @@ def _compile_capabilities(
 
         recommendations = cap.get("recommendations", [])
         if isinstance(recommendations, list) and recommendations:
+            # recommendation cases 只用于拒答/追问推荐，与 seed cases 的能力边界用途分离。
             case_id = str(cap.get("recommendation_case_id", "")).strip()
             if not case_id:
                 case_id = f"case_{capability_id.replace('.', '_')}"
@@ -255,6 +257,7 @@ def _normalize_intent_seed_item(
     template_id = str(template.get("template_id") or intent.get("template_id", "")).strip()
     route_type = str(intent.get("route_type", "")).strip()
     if not route_type:
+        # 未显式指定时，带 template 的 intent 默认偏向模板路由，否则作为 NL2SQL seed。
         route_type = "route_template" if template_id else "route_nl2sql"
 
     item = {
@@ -284,6 +287,7 @@ def _normalize_intent_template_item(
     enabled: bool,
 ) -> dict[str, Any] | None:
     """归一化单条 intent 为 template 结构（可选）。"""
+    # 优先读取嵌套 template 配置，平铺字段仅作兼容回退。
     template = _to_dict(intent.get("template"))
     template_id = str(template.get("template_id") or intent.get("template_id", "")).strip()
     if not template_id:

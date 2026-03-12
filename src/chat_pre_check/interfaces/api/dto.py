@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 
 class RouteRequestDTO(BaseModel):
-    """路由请求 DTO。"""
+    """HTTP 请求体：只承载接口入参，不参与内部路由决策。"""
 
     input_text: str
     context: dict[str, Any] = Field(default_factory=dict)
@@ -16,7 +16,7 @@ class RouteRequestDTO(BaseModel):
 
 
 class ActionOptionDTO(BaseModel):
-    """交互选项 DTO。"""
+    """交互建议 DTO，对应 RouteDecision.options。"""
 
     label: str
     intent: str | None = None
@@ -26,7 +26,7 @@ class ActionOptionDTO(BaseModel):
 
 
 class RouteResponseDTO(BaseModel):
-    """路由响应 DTO。"""
+    """HTTP 响应体：对外暴露稳定字段集合。"""
 
     type: str
     message: str

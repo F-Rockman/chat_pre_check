@@ -80,6 +80,7 @@ class PrecheckEngine:
                 max_clarify_round=ctx.max_clarify_round,
                 next_action="refuse",
             )
+        # trace 最后统一渲染，保证成功/失败路径都带上完整观测信息。
         decision.trace = render_trace(ctx.trace, level=request.trace_level)
         # 补全兜底字段，确保响应结构稳定。
         if not decision.scene:

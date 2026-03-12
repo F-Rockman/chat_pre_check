@@ -40,6 +40,7 @@ class PrefillDomainRouter:
         selected: list[str] = []
         seen: set[str] = set()
 
+        # 选择顺序按“上下文场景 -> 当前场景 -> 已有槽位 -> 关键词”收敛，尽量少扫无关域。
         for domain in self._domains_for_scene(ctx.context_scene):
             self._append(domain, selected, seen, available_set)
         for domain in self._domains_for_scene(ctx.scene):
@@ -129,6 +130,7 @@ class PrefillArbiter:
             for slot_name, hits in result.slot_matches.items():
                 bucket = slot_bucket.setdefault(slot_name, {})
                 for hit in hits:
+                    # 同槽位命中相同规范化值时，仅保留排序更优的一条，避免跨域重复候选污染。
                     key = f"{slot_name}:{hit.resolved_slot_value()}"
                     prev = bucket.get(key)
                     if prev is None or self._rank_key(slot_name, hit) < self._rank_key(

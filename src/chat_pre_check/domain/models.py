@@ -10,6 +10,8 @@ from chat_pre_check.domain.enums import DecisionType, OutOfScopeReason
 
 @dataclass(slots=True)
 class TimeRangeSpec:
+    """时间范围标准结构，供规则抽取、模板命中和下游执行共享。"""
+
     mode: str = "relative"
     preset: str | None = None
     timezone: str | None = None
@@ -24,6 +26,8 @@ class TimeRangeSpec:
 
 @dataclass(slots=True)
 class Candidate:
+    """实体候选，如设备、地域等解析结果。"""
+
     entity_id: str
     name: str
     score: float
@@ -32,6 +36,8 @@ class Candidate:
 
 @dataclass(slots=True)
 class SearchHit:
+    """检索召回结果的统一表示。"""
+
     doc_id: str
     score: float
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -39,6 +45,8 @@ class SearchHit:
 
 @dataclass(slots=True)
 class ActionOption:
+    """返回给前端/调用方的下一步可操作建议。"""
+
     label: str
     intent: str | None = None
     preset_slots: dict[str, Any] = field(default_factory=dict)
@@ -48,6 +56,8 @@ class ActionOption:
 
 @dataclass(slots=True)
 class TraceStep:
+    """单个中间件的观测事件。"""
+
     step: str
     decision: str
     reason: str
@@ -59,6 +69,8 @@ class TraceStep:
 
 @dataclass(slots=True)
 class TraceCollector:
+    """请求级 trace 容器，串联整条路由链路的观测信息。"""
+
     request_id: str = field(default_factory=lambda: str(uuid4()))
     started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     steps: list[TraceStep] = field(default_factory=list)
@@ -70,6 +82,8 @@ class TraceCollector:
 
 @dataclass(slots=True)
 class RouteRequest:
+    """外部接口输入的标准请求结构。"""
+
     input_text: str
     context: dict[str, Any] = field(default_factory=dict)
     tenant_id: str | None = None
@@ -79,6 +93,8 @@ class RouteRequest:
 
 @dataclass(slots=True)
 class RequestContext:
+    """内部运行态上下文，所有中间件通过它共享状态。"""
+
     input_text: str
     norm_text: str = ""
     tenant_id: str | None = None
@@ -100,6 +116,8 @@ class RequestContext:
 
 @dataclass(slots=True)
 class RouteDecision:
+    """最终路由结果；所有出口统一收敛到这个结构。"""
+
     type: DecisionType
     message: str
     scene: str | None = None
@@ -115,6 +133,7 @@ class RouteDecision:
     trace: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
+        # 对外统一转成可序列化结构，避免上层依赖 dataclass 细节。
         return {
             "type": self.type.value,
             "message": self.message,

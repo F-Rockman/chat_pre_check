@@ -31,6 +31,7 @@ def get_router(engine_provider) -> APIRouter:
                 trace_level=payload.trace_level,
             ),
         )
+        # API 边界统一返回 DTO，避免直接暴露内部模型对象。
         return RouteResponseDTO.model_validate(decision.to_dict())
 
     return router

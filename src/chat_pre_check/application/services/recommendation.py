@@ -79,6 +79,7 @@ class RecommendationService:
     ) -> list[ActionOption]:
         options: list[ActionOption] = []
         for hit in seed_hits[:limit]:
+            # seed 命中用于“边界内相似能力推荐”，不直接替代当前问题执行。
             label = str(hit.metadata.get("label", "相似能力查询"))
             case_id = hit.metadata.get("case_id")
             preset_slots = {}
@@ -118,6 +119,7 @@ class RecommendationService:
         ctx: RequestContext,
         candidate_limit: int = 3,
     ) -> list[ActionOption]:
+        # 常见槽位直接给固定建议，实体槽位则优先消费解析候选。
         if missing_slot == "time_range":
             return [
                 ActionOption(

@@ -38,6 +38,7 @@ class TemplateMatcherMiddleware:
     def process(self, ctx: RequestContext) -> RouteDecision | None:
         started = time.perf_counter()
         if ctx.flow_type == "report":
+            # report 流不走 query 模板，直接留给报告链路处理。
             elapsed = (time.perf_counter() - started) * 1000
             ctx.trace.add_step(
                 TraceStep(
@@ -110,6 +111,7 @@ class TemplateMatcherMiddleware:
         scored: list[tuple[str, float, dict[str, float], dict]] = []
         for template in templates:
             template_id = template["template_id"]
+            # 模板命中除了文本相似度，还要求当前槽位与模板 schema 基本适配。
             score_parts = {
                 "rule": max(
                     keyword_overlap_score(ctx.norm_text, template.get("keywords", [])),
@@ -131,6 +133,7 @@ class TemplateMatcherMiddleware:
         ctx.trace.summary["template_top1"] = top_template_id
 
         if top_score < self.threshold:
+            # 不达阈值时不直接拒答，继续放行给 SeedGuard/NL2SQL 兜底。
             elapsed = (time.perf_counter() - started) * 1000
             ctx.trace.add_step(
                 TraceStep(
@@ -151,6 +154,7 @@ class TemplateMatcherMiddleware:
         required = top_template.get("slot_schema", {}).get("required", [])
         missing_slots = [slot for slot in required if ctx.slots.get(slot) in (None, "")]
         if missing_slots:
+            # 命中模板但参数不够时，优先追问补参，而不是直接降级到 NL2SQL。
             elapsed = (time.perf_counter() - started) * 1000
             ctx.trace.add_step(
                 TraceStep(

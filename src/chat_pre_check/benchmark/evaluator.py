@@ -7,8 +7,8 @@ from pathlib import Path
 from typing import Any
 
 from chat_pre_check.bootstrap import build_engine
-from chat_pre_check.demo.fakes import DemoDeviceResolver, DemoRegionResolver, DemoVectorRetriever
 from chat_pre_check.demo.local_runtime import build_local_fallback_engine
+from chat_pre_check.demo.runtime import build_mock_demo_engine
 from chat_pre_check.domain.models import RouteRequest
 
 
@@ -125,12 +125,7 @@ def build_benchmark_engine(
     if profile == "local_fallback":
         return build_local_fallback_engine(config_dir=config_dir)
     if profile == "mock":
-        return build_engine(
-            config_dir=config_dir,
-            retriever_override=DemoVectorRetriever(),
-            device_resolver_override=DemoDeviceResolver(),
-            region_resolver_override=DemoRegionResolver(),
-        )
+        return build_mock_demo_engine(config_dir=config_dir)
     if profile == "live":
         return build_engine(
             config_dir=config_dir,

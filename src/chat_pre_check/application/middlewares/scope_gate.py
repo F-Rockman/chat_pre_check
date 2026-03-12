@@ -39,6 +39,7 @@ class ScopeGateMiddleware:
     def process(self, ctx: RequestContext) -> RouteDecision | None:
         started = time.perf_counter()
         if ctx.scene and self.scene_repository.get(ctx.scene):
+            # 上游已明确选中场景时，ScopeGate 不再重复打分。
             elapsed = (time.perf_counter() - started) * 1000
             ctx.trace.add_step(
                 TraceStep(
@@ -132,6 +133,7 @@ class ScopeGateMiddleware:
                 scene.get("required_slots", []),
                 ctx.slots,
             )
+            # scene 打分由规则、向量、实体覆盖度三部分组成。
             score_parts = {
                 "rule": max(
                     keyword_overlap_score(ctx.norm_text, scene.get("keywords", [])),
@@ -179,6 +181,7 @@ class ScopeGateMiddleware:
             )
 
         if (top1_score - top2_score) < self.thresholds["T_scene_gap"]:
+            # top1/top2 太接近时不强行判定，改为让用户确认场景。
             elapsed = (time.perf_counter() - started) * 1000
             top_candidates = [(sid, score) for sid, score, _ in scored[:3]]
             ctx.trace.add_step(
@@ -224,6 +227,7 @@ class ScopeGateMiddleware:
         mapping: dict[str, float] = {}
         if not hits:
             return mapping
+        # 检索分做相对归一化，便于和规则分进入同一套融合逻辑。
         max_score = max(hit.score for hit in hits) or 1.0
         for hit in hits:
             candidate_key = hit.metadata.get(key)

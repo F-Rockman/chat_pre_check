@@ -17,6 +17,7 @@ class SceneRouterMiddleware:
     def process(self, ctx: RequestContext) -> RouteDecision | None:
         started = time.perf_counter()
         if ctx.context_scene:
+            # 仅在上下文场景真实存在时回填，避免污染当前请求。
             if self.scene_repository.get(ctx.context_scene):
                 ctx.scene = ctx.context_scene
         elapsed = (time.perf_counter() - started) * 1000

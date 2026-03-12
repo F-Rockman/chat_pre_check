@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import sys
 from pathlib import Path
@@ -13,7 +12,7 @@ if str(SRC) not in sys.path:
 
 from chat_pre_check.bootstrap import build_engine
 from chat_pre_check.demo.local_runtime import build_local_fallback_engine
-from chat_pre_check.domain.models import RouteRequest
+from chat_pre_check.demo.runtime import print_route_summary, route_payload
 from chat_pre_check.infrastructure.config.loader import load_app_config
 from chat_pre_check.infrastructure.resolvers.search_client_factory import (
     build_search_client,
@@ -24,6 +23,7 @@ DEFAULT_OS_URL = "http://localhost:9200"
 
 DEMO_INPUTS = [
     "近24小时接口错误包告警Top10",
+    "查1天内告警Top10的接口错误包",
     "查询最近接口异常包告警Top5",
     "近7天华东BGP flap Top20",
     "近24小时设备CPU利用率Top10",
@@ -135,31 +135,14 @@ def _search_backend_ready(
 
 
 def run_one(engine, text: str, args: argparse.Namespace) -> None:
-    decision = engine.route(
-        RouteRequest(
-            input_text=text,
-            role=args.role,
-            tenant_id=args.tenant_id,
-            trace_level=args.trace_level,
-        )
+    payload = route_payload(
+        engine,
+        text,
+        role=args.role,
+        tenant_id=args.tenant_id,
+        trace_level=args.trace_level,
     )
-    payload = decision.to_dict()
-    print("=" * 80)
-    print(f"INPUT      : {text}")
-    print(f"TYPE       : {payload['type']}")
-    print(f"SCENE      : {payload.get('scene')}")
-    print(f"TEMPLATE   : {payload.get('template_id')}")
-    print(f"MESSAGE    : {payload.get('message')}")
-    print(f"MISSING    : {payload.get('missing_slots')}")
-    print(f"SLOTS      : {json.dumps(payload.get('slots', {}), ensure_ascii=False)}")
-    options = payload.get("options", [])
-    if options:
-        print("OPTIONS    :")
-        for idx, option in enumerate(options, start=1):
-            print(f"  {idx}. {option.get('label')}")
-    if args.show_trace:
-        print("TRACE      :")
-        print(json.dumps(payload.get("trace", {}), ensure_ascii=False, indent=2))
+    print_route_summary(text, payload, show_trace=args.show_trace)
 
 
 def run_interactive(engine, args: argparse.Namespace) -> None:

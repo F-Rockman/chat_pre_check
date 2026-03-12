@@ -27,6 +27,7 @@ class SeedScopeGuardMiddleware:
     def process(self, ctx: RequestContext) -> RouteDecision | None:
         started = time.perf_counter()
         if ctx.flow_type and ctx.flow_type != "query":
+            # 只有 query -> NL2SQL 兜底路径需要做 seed 边界保护。
             elapsed = (time.perf_counter() - started) * 1000
             ctx.trace.add_step(
                 TraceStep(
@@ -91,6 +92,7 @@ class SeedScopeGuardMiddleware:
         )
 
         if allowed_scenes and ctx.scene and ctx.scene not in allowed_scenes:
+            # 某些场景即使有 seed 命中，也可以通过配置禁止走 NL2SQL。
             elapsed = (time.perf_counter() - started) * 1000
             ctx.trace.add_step(
                 TraceStep(

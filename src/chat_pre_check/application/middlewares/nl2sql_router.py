@@ -13,6 +13,7 @@ class NL2SQLRouterMiddleware:
 
     def process(self, ctx: RequestContext) -> RouteDecision | None:
         started = time.perf_counter()
+        # 流水线走到这里说明：没有被 report/template/clarify/refuse 提前截断。
         elapsed = (time.perf_counter() - started) * 1000
         ctx.trace.add_step(
             TraceStep(

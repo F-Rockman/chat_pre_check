@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import sys
 from pathlib import Path
@@ -12,8 +11,11 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from chat_pre_check.bootstrap import build_engine
-from chat_pre_check.demo.fakes import DemoDeviceResolver, DemoRegionResolver, DemoVectorRetriever
-from chat_pre_check.domain.models import RouteRequest
+from chat_pre_check.demo.runtime import (
+    build_mock_demo_engine,
+    print_route_summary,
+    route_payload,
+)
 
 
 DEMO_SETS = {
@@ -57,40 +59,18 @@ def build_demo_engine(args: argparse.Namespace):
             os_url=args.os_url or os.getenv("CHAT_PRE_CHECK_OS_URL"),
         )
 
-    return build_engine(
-        config_dir=args.config_dir,
-        retriever_override=DemoVectorRetriever(),
-        device_resolver_override=DemoDeviceResolver(),
-        region_resolver_override=DemoRegionResolver(),
-    )
+    return build_mock_demo_engine(config_dir=args.config_dir)
 
 
 def run_one(engine, text: str, args: argparse.Namespace) -> None:
-    decision = engine.route(
-        RouteRequest(
-            input_text=text,
-            role=args.role,
-            tenant_id=args.tenant_id,
-            trace_level=args.trace_level,
-        )
+    payload = route_payload(
+        engine,
+        text,
+        role=args.role,
+        tenant_id=args.tenant_id,
+        trace_level=args.trace_level,
     )
-    payload = decision.to_dict()
-    print("=" * 80)
-    print(f"INPUT      : {text}")
-    print(f"TYPE       : {payload['type']}")
-    print(f"SCENE      : {payload.get('scene')}")
-    print(f"TEMPLATE   : {payload.get('template_id')}")
-    print(f"MESSAGE    : {payload.get('message')}")
-    print(f"MISSING    : {payload.get('missing_slots')}")
-    print(f"SLOTS      : {json.dumps(payload.get('slots', {}), ensure_ascii=False)}")
-    options = payload.get("options", [])
-    if options:
-        print("OPTIONS    :")
-        for idx, option in enumerate(options, start=1):
-            print(f"  {idx}. {option.get('label')}")
-    if args.show_trace:
-        print("TRACE      :")
-        print(json.dumps(payload.get("trace", {}), ensure_ascii=False, indent=2))
+    print_route_summary(text, payload, show_trace=args.show_trace)
 
 
 def run_demo_set(engine, args: argparse.Namespace) -> None:

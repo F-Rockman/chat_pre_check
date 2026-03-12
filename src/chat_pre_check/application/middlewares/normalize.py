@@ -11,6 +11,7 @@ SPACE_RE = re.compile(r"\s+")
 
 def normalize_text(text: str) -> str:
     """文本归一化：小写化、标点空格化、压缩多余空白。"""
+    # 这里只做轻量标准化，不做语义改写，避免影响后续规则和检索命中。
     text = text.strip().lower()
     text = text.replace("，", " ").replace("。", " ").replace("？", " ").replace("！", " ")
     text = SPACE_RE.sub(" ", text)

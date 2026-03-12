@@ -25,6 +25,7 @@ class ReportRouterMiddleware:
             )
             return None
 
+        # report 流当前采用最小闭环：一旦分流命中，直接输出报告路由结果。
         elapsed = (time.perf_counter() - started) * 1000
         ctx.trace.add_step(
             TraceStep(
@@ -46,4 +47,3 @@ class ReportRouterMiddleware:
             max_clarify_round=ctx.max_clarify_round,
             next_action="route_report",
         )
-

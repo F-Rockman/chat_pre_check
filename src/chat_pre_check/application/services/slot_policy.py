@@ -21,6 +21,7 @@ class SlotPolicyEngine:
         self.scene_cfg = self.policy_config.get("scenes", {})
 
     def max_ask_per_turn(self, scene_id: str) -> int:
+        # 先看场景级覆盖，再回退全局默认。
         scene = self.scene_cfg.get(scene_id, {})
         value = scene.get("max_ask_per_turn", self.default_cfg.get("max_ask_per_turn", 2))
         try:
@@ -92,6 +93,7 @@ class SlotPolicyEngine:
         scene_slots = self.scene_cfg.get(scene_id, {}).get("slots", {})
         default_slots = self.default_cfg.get("slots", {})
         merged = {}
+        # 合并顺序：全局通配默认 < 全局槽位默认 < 场景槽位覆盖。
         merged.update(default_slots.get("*", {}))
         merged.update(default_slots.get(slot_name, {}))
         merged.update(scene_slots.get(slot_name, {}))

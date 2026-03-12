@@ -43,6 +43,7 @@ class SlotClarifierMiddleware:
         scene = self.scene_repository.get(ctx.scene) or {}
         defaults = scene.get("defaults", {})
         for slot_name, default_value in defaults.items():
+            # 默认值只填补空槽位，不覆盖显式用户输入。
             if ctx.slots.get(slot_name) in (None, ""):
                 ctx.slots[slot_name] = default_value
 
@@ -103,6 +104,7 @@ class SlotClarifierMiddleware:
                 )
 
             ctx.clarify_round += 1
+            # pending_slots 记录“本轮打算问什么”，便于多轮对话续接。
             ctx.pending_slots = list(ask_slots)
             elapsed = (time.perf_counter() - started) * 1000
             ctx.trace.add_step(
