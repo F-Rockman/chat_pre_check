@@ -165,4 +165,7 @@ python scripts/eval_network_ops_benchmark.py \
 - 部署、后端切换与链路架构指南：[docs/DEPLOYMENT_AND_ARCHITECTURE_GUIDE.md](docs/DEPLOYMENT_AND_ARCHITECTURE_GUIDE.md)
 - 对话式前置处理 V1 总体设计稿（含配置草案、时序图、决策表）：[docs/V1_CONVERSATIONAL_PRECHECK_DESIGN.md](docs/V1_CONVERSATIONAL_PRECHECK_DESIGN.md)
 - 对话式前置处理 V1 最小落地实施清单（按文件/测试/提交拆分）：[docs/V1_MINIMAL_IMPLEMENTATION_CHECKLIST.md](docs/V1_MINIMAL_IMPLEMENTATION_CHECKLIST.md)
+- 一次请求从进入系统到产出决策的完整执行路径说明：[docs/一次请求执行路径详解.md](docs/一次请求执行路径详解.md)
+- 按仓库目录与模块职责梳理的代码结构说明：[docs/目录与模块详解.md](docs/目录与模块详解.md)
+- 拒答、追问、引导（推荐）三类交互方案的分类说明：[docs/拒答追问引导分类说明.md](docs/拒答追问引导分类说明.md)
 - 版本变更记录：[CHANGELOG.md](CHANGELOG.md)
