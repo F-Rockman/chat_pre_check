@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Template Studio</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Local Node.js Studio</p>
+          <h1>Template Studio</h1>
+          <p class="subtitle">导入模板、用 LLM 生成模板、测试匹配、导出结果，全部在本地完成。</p>
+        </div>
+        <div class="workspace-actions">
+          <label class="file-button">
+            导入 JSON
+            <input id="import-file" type="file" accept="application/json,.json" hidden />
+          </label>
+          <button id="save-workspace" class="secondary">保存工作区</button>
+          <button id="reset-workspace" class="secondary">恢复默认模板</button>
+          <button id="export-config">导出模板文件</button>
+        </div>
+      </header>
+
+      <main class="layout">
+        <aside class="sidebar card">
+          <div class="sidebar-head">
+            <div>
+              <h2>模板列表</h2>
+              <p id="workspace-meta" class="muted"></p>
+            </div>
+            <button id="add-template">新建模板</button>
+          </div>
+          <input id="template-search" class="search" type="search" placeholder="搜索 template_id / description" />
+          <div id="template-list" class="template-list"></div>
+          <div class="sidebar-actions">
+            <button id="duplicate-template" class="secondary">复制当前模板</button>
+            <button id="delete-template" class="danger">删除当前模板</button>
+          </div>
+        </aside>
+
+        <section class="main-column">
+          <section class="card" id="generator-panel">
+            <div class="section-head">
+              <div>
+                <h2>一句话生成模板</h2>
+                <p class="muted">输入一句真实问数 query，工作台会调用大模型拆解并生成模板建议。</p>
+              </div>
+            </div>
+            <div class="generator-grid">
+              <div>
+                <label class="field">
+                  <span>原始句子</span>
+                  <textarea id="generator-input" rows="4" placeholder="例如：查询最近 cpu 大于 80 且内存大于 70 的设备列表"></textarea>
+                </label>
+                <div class="llm-settings">
+                  <label class="field">
+                    <span>API Key</span>
+                    <input id="llm-api-key" type="password" placeholder="sk-..." />
+                  </label>
+                  <label class="field">
+                    <span>Base URL</span>
+                    <input id="llm-base-url" type="text" />
+                  </label>
+                  <label class="field">
+                    <span>Model</span>
+                    <input id="llm-model" type="text" />
+                  </label>
+                </div>
+                <div class="inline-actions">
+                  <button id="generate-template">生成模板建议</button>
+                </div>
+              </div>
+              <div>
+                <div id="generator-result" class="generator-result empty">尚未生成模板建议。</div>
+              </div>
+            </div>
+          </section>
+
+          <section class="card" id="editor-panel">
+            <div class="section-head">
+              <div>
+                <h2>模板编辑器</h2>
+                <p class="muted">常用字段支持直接编辑，复杂结构保留 JSON 高级编辑入口。</p>
+              </div>
+            </div>
+            <div id="editor-root"></div>
+          </section>
+
+          <section class="card" id="tester-panel">
+            <div class="section-head">
+              <div>
+                <h2>模板匹配测试</h2>
+                <p class="muted">输入一条 query，验证当前模板集合是否能稳定命中；也可以只测试当前模板。</p>
+              </div>
+            </div>
+            <div class="tester-grid">
+              <label class="field grow">
+                <span>测试 query</span>
+                <textarea id="match-input" rows="3" placeholder="例如：近24小时接口错误包告警前十"></textarea>
+              </label>
+              <label class="toggle">
+                <input id="scope-current-template" type="checkbox" />
+                <span>只测当前模板</span>
+              </label>
+              <button id="run-match">运行匹配测试</button>
+            </div>
+            <div id="match-result" class="result-panel empty">尚未执行匹配测试。</div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+  </html>

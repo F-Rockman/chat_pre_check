@@ -112,6 +112,19 @@ python main.py --llm-slot-fallback --input "近24小时接口错误包告警前�
 python -m pytest -q
 ```
 
+本地模板工作台：
+
+```bash
+npm install
+npm run studio
+```
+
+Windows 下也可以直接双击：
+
+```text
+start-template-studio.cmd
+```
+
 ## 输出契约
 
 示例：
@@ -706,6 +719,8 @@ python -m pytest -q tests/test_live_llm_slot_fallback.py
 主要文件职责：
 
 - [main.py](D:/GitHub/chat_pre_check_blank/main.py)：CLI 入口
+- [template-studio/server.js](D:/GitHub/chat_pre_check_blank/template-studio/server.js)：Node.js 本地模板工作台服务
+- [template-studio/public/app.js](D:/GitHub/chat_pre_check_blank/template-studio/public/app.js)：模板工作台前端交互
 - [engine.py](D:/GitHub/chat_pre_check_blank/src/template_capability/engine.py)：主匹配流程
 - [extractors.py](D:/GitHub/chat_pre_check_blank/src/template_capability/extractors.py)：标准化和槽位抽取
 - [scoring.py](D:/GitHub/chat_pre_check_blank/src/template_capability/scoring.py)：召回、相似度、约束打分
@@ -766,4 +781,30 @@ python -m pytest -q tests/test_live_llm_slot_fallback.py
 ```bash
 python -m pytest -q
 python tools/evaluate_matcher.py
+npm run studio:test
+```
+
+## Template Studio
+
+新增了一个本地 Node.js 模板工作台，位置在 [template-studio](D:/GitHub/chat_pre_check_blank/template-studio)。
+
+它提供这几件事：
+
+- 导入现有 `templates.json`
+- 图形化编辑常用模板字段
+- 用兼容 OpenAI 协议的大模型把一句真实 query 拆成模板建议
+- 本地测试当前模板集合是否命中
+- 导出当前模板文件
+- 保存一份工作区快照，便于下次继续编辑
+
+推荐启动方式：
+
+```bash
+start-template-studio.cmd
+```
+
+默认地址：
+
+```text
+http://127.0.0.1:3847
 ```

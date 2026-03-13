@@ -1,0 +1,248 @@
+export const DEFAULT_SCORE_WEIGHTS = {
+  lexical: 0.2,
+  sample: 0.1,
+  vector: 0.15,
+  fusion: 0.1,
+  slot_fit: 0.15,
+  constraint: 0.1,
+  structure: 0.2
+};
+
+export const DEFAULT_LEXICAL_FIELD_WEIGHTS = {
+  description: 0.6,
+  utterances: 1.0,
+  must_terms: 1.6
+};
+
+export const DEFAULT_MATCHER = {
+  match_threshold: 0.58,
+  ambiguity_margin: 0.03,
+  recall_top_k: 30,
+  weights: DEFAULT_SCORE_WEIGHTS,
+  fusion_rrf_k: 60,
+  lexical_field_weights: DEFAULT_LEXICAL_FIELD_WEIGHTS,
+  blocked_terms: [
+    "分析",
+    "原因",
+    "根因",
+    "报告",
+    "预测",
+    "总结",
+    "建议",
+    "解决方案",
+    "为什么",
+    "走势",
+    "优化"
+  ],
+  llm_fallback: {
+    enabled: false,
+    max_candidates: 3,
+    score_margin: 0.08,
+    max_missing_slots: 2
+  },
+  llm_slot_fallback: {
+    enabled: false,
+    max_missing_slots: 2,
+    min_score: 0.58,
+    allow_on_matched: false
+  },
+  vector: {
+    provider: "local_tfidf",
+    dimension: 512
+  }
+};
+
+export function deepClone(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+export function normalizeText(text = "") {
+  return String(text)
+    .normalize("NFKC")
+    .trim()
+    .toLowerCase()
+    .replace(/[，。？！!?,:：;；、()\[\]{}<>《》"'`]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function ensureArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+export function ensureObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+export function clampScore(score) {
+  if (Number.isNaN(score)) {
+    return 0;
+  }
+  return Math.max(0, Math.min(1, score));
+}
+
+export function slugifyTemplateId(input, fallback = "template.generated") {
+  const slug = String(input || "")
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[^a-z0-9\u4e00-\u9fff]+/g, ".")
+    .replace(/\.+/g, ".")
+    .replace(/^\.|\.$/g, "");
+  return slug || fallback;
+}
+
+export function normalizeConfig(payload) {
+  const raw = ensureObject(payload);
+  const matcher = ensureObject(raw.matcher);
+  const vector = ensureObject(matcher.vector);
+  const normalizedMatcher = {
+    match_threshold: Number(matcher.match_threshold ?? DEFAULT_MATCHER.match_threshold),
+    ambiguity_margin: Number(matcher.ambiguity_margin ?? DEFAULT_MATCHER.ambiguity_margin),
+    recall_top_k: Number(matcher.recall_top_k ?? DEFAULT_MATCHER.recall_top_k),
+    weights: {
+      ...DEFAULT_SCORE_WEIGHTS,
+      ...coerceNumberMap(matcher.weights)
+    },
+    fusion_rrf_k: Number(matcher.fusion_rrf_k ?? DEFAULT_MATCHER.fusion_rrf_k),
+    lexical_field_weights: {
+      ...DEFAULT_LEXICAL_FIELD_WEIGHTS,
+      ...coerceNumberMap(matcher.lexical_field_weights)
+    },
+    blocked_terms: ensureArray(matcher.blocked_terms).map((item) => String(item)),
+    llm_fallback: {
+      ...DEFAULT_MATCHER.llm_fallback,
+      ...ensureObject(matcher.llm_fallback)
+    },
+    llm_slot_fallback: {
+      ...DEFAULT_MATCHER.llm_slot_fallback,
+      ...ensureObject(matcher.llm_slot_fallback)
+    },
+    vector: {
+      provider: String(vector.provider ?? DEFAULT_MATCHER.vector.provider),
+      dimension: Number(vector.dimension ?? DEFAULT_MATCHER.vector.dimension)
+    }
+  };
+
+  const slotExtractors = normalizeSlotExtractorMap(raw.slot_extractors);
+  const templates = ensureArray(raw.templates)
+    .filter((item) => item && typeof item === "object")
+    .map((item, index) => normalizeTemplate(item, index));
+
+  return {
+    matcher: normalizedMatcher,
+    slot_extractors: slotExtractors,
+    templates
+  };
+}
+
+export function normalizeTemplate(template, index = 0) {
+  const item = ensureObject(template);
+  const llm = ensureObject(item.llm_slot_extraction);
+  return {
+    template_id: String(item.template_id || `template.generated.${index + 1}`),
+    query_mode: String(item.query_mode || "metric_query"),
+    description: String(item.description || ""),
+    utterances: ensureArray(item.utterances).map((value) => String(value)).filter(Boolean),
+    required_slots: ensureArray(item.required_slots).map((value) => String(value)).filter(Boolean),
+    optional_slots: ensureArray(item.optional_slots).map((value) => String(value)).filter(Boolean),
+    must_terms: ensureArray(item.must_terms)
+      .map((group) => ensureArray(group).map((value) => String(value)).filter(Boolean))
+      .filter((group) => group.length > 0),
+    negative_terms: ensureArray(item.negative_terms).map((value) => String(value)).filter(Boolean),
+    slot_constraints: normalizeConstraintMap(item.slot_constraints),
+    slot_extractors: normalizeSlotExtractorMap(item.slot_extractors),
+    llm_slot_extraction: {
+      enabled: Boolean(llm.enabled),
+      slots: ensureArray(llm.slots).map((value) => String(value)).filter(Boolean),
+      instructions: String(llm.instructions || ""),
+      allow_on_matched: Boolean(llm.allow_on_matched)
+    },
+    metadata: ensureObject(item.metadata)
+  };
+}
+
+export function createBlankTemplate() {
+  return {
+    template_id: `template.generated.${Date.now()}`,
+    query_mode: "metric_query",
+    description: "",
+    utterances: [],
+    required_slots: ["query_operator"],
+    optional_slots: [],
+    must_terms: [],
+    negative_terms: ["原因", "根因", "报告", "总结", "预测"],
+    slot_constraints: {},
+    slot_extractors: {},
+    llm_slot_extraction: {
+      enabled: false,
+      slots: [],
+      instructions: "",
+      allow_on_matched: false
+    },
+    metadata: {}
+  };
+}
+
+function normalizeSlotExtractorMap(value) {
+  const input = ensureObject(value);
+  return Object.fromEntries(
+    Object.entries(input).map(([slotName, definition]) => {
+      const slotObject = ensureObject(definition);
+      return [
+        String(slotName),
+        {
+          slot_name: String(slotObject.slot_name || slotName),
+          extractors: ensureArray(slotObject.extractors)
+            .filter((item) => item && typeof item === "object")
+            .map((item) => normalizeExtractor(item))
+        }
+      ];
+    })
+  );
+}
+
+function normalizeExtractor(extractor) {
+  const item = ensureObject(extractor);
+  const type = String(item.type || "").toLowerCase();
+  if (type === "regex") {
+    return {
+      type: "regex",
+      patterns: ensureArray(item.patterns)
+        .filter((pattern) => pattern && typeof pattern === "object")
+        .map((pattern) => ({
+          pattern: String(pattern.pattern || ""),
+          group: Number(pattern.group ?? 1),
+          value_type: String(pattern.value_type || "string"),
+          min: pattern.min ?? null,
+          max: pattern.max ?? null,
+          value: pattern.value ?? null
+        }))
+    };
+  }
+  return {
+    type: "keyword_value",
+    cases: ensureArray(item.cases)
+      .filter((entry) => entry && typeof entry === "object")
+      .map((entry) => ({
+        terms: ensureArray(entry.terms).map((term) => String(term)).filter(Boolean),
+        value: entry.value ?? null
+      }))
+  };
+}
+
+function normalizeConstraintMap(value) {
+  const input = ensureObject(value);
+  return Object.fromEntries(
+    Object.entries(input).map(([slotName, allowed]) => [
+      String(slotName),
+      ensureArray(allowed).length > 0 ? ensureArray(allowed) : [allowed]
+    ])
+  );
+}
+
+function coerceNumberMap(value) {
+  const input = ensureObject(value);
+  return Object.fromEntries(
+    Object.entries(input).map(([key, item]) => [String(key), Number(item)])
+  );
+}
