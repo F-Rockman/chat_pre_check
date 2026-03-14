@@ -174,6 +174,7 @@ start-template-studio.cmd
 
 - [template_authoring_guide.md](D:/GitHub/chat_pre_check_blank/docs/template_authoring_guide.md)
 - [slot_extractors_authoring_guide.md](D:/GitHub/chat_pre_check_blank/docs/slot_extractors_authoring_guide.md)
+- [typical_template_examples.md](D:/GitHub/chat_pre_check_blank/docs/typical_template_examples.md)
 
 顶层结构：
 
@@ -793,9 +794,27 @@ npm run studio:test
 - 导入现有 `templates.json`
 - 图形化编辑常用模板字段
 - 用兼容 OpenAI 协议的大模型把一句真实 query 拆成模板建议
+- 返回“为什么这样设计”的说明，方便人工微调模板
 - 本地测试当前模板集合是否命中
 - 导出当前模板文件
 - 保存一份工作区快照，便于下次继续编辑
+
+模板生成这条链路额外做了两层兼容：
+
+- 兼容 Qwen / GLM 这类 OpenAI-compatible 模型返回的额外思考文本、代码块包裹和 `<think>` 标签
+- 支持在内部调试时关闭 SSL 校验
+
+内部调试如果要默认关闭 SSL 校验，可以设置：
+
+```bash
+$env:TEMPLATE_STUDIO_INSECURE_SSL="1"
+```
+
+Python 侧兼容协议调用也支持：
+
+```bash
+$env:TEMPLATE_CAPABILITY_INSECURE_SSL="1"
+```
 
 推荐启动方式：
 
@@ -808,3 +827,36 @@ start-template-studio.cmd
 ```text
 http://127.0.0.1:3847
 ```
+
+### 已验证的 OpenAI-compatible 模型
+
+下面这些模型已经在 `https://coding.dashscope.aliyuncs.com/v1` 下做过真实连通性验证：
+
+- `qwen3.5-plus`
+- `glm-5`
+- `glm-4.7`
+- `qwen3-coder-next`
+
+验证范围包括：
+
+- 普通 `chat.completions`
+- `response_format: {"type": "json_object"}` 的 JSON 输出
+
+推荐配置方式：
+
+```bash
+$env:DASHSCOPE_BASE_URL="https://coding.dashscope.aliyuncs.com/v1"
+$env:DASHSCOPE_MODEL="qwen3.5-plus"
+$env:DASHSCOPE_API_KEY="你的真实 key"
+```
+
+也可以在 Template Studio 页面里直接填写：
+
+- `API Key`
+- `Base URL`
+- `Model`
+
+不建议把真实 API key 明文写进仓库或 README。更稳的做法是：
+
+- 用环境变量
+- 或只保存在本地工作台输入框 / 本地存储里

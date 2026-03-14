@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from typing import Any
 
 
-_JSON_BLOCK_RE = re.compile(r"\{.*\}", re.DOTALL)
+_THINK_TAG_RE = re.compile(r"<thi(?:nk|ngk)\b[^>]*>.*?</thi(?:nk|ngk)>", re.IGNORECASE | re.DOTALL)
+_THINKING_TAG_RE = re.compile(r"<thinking\b[^>]*>.*?</thinking>", re.IGNORECASE | re.DOTALL)
+_CODE_BLOCK_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)```", re.IGNORECASE)
 
 
 def build_openai_client(
@@ -21,15 +24,21 @@ def build_openai_client(
     """
     try:
         from openai import OpenAI
+        import httpx
     except ImportError as exc:
         raise RuntimeError(
             "The `openai` package is required for LLM or remote embedding calls. "
             "Install it with `pip install openai`."
         ) from exc
+    verify_ssl = not _env_truthy("TEMPLATE_CAPABILITY_INSECURE_SSL") and not _env_truthy("OPENAI_INSECURE_SSL")
     return OpenAI(
         api_key=api_key,
         base_url=base_url,
         timeout=timeout_seconds,
+        http_client=httpx.Client(
+            verify=verify_ssl,
+            timeout=timeout_seconds,
+        ),
     )
 
 
@@ -61,20 +70,72 @@ def extract_chat_completion_content(response: Any) -> Any:
 
 def parse_json_content(content: Any) -> dict[str, Any] | None:
     """把 message content 尽量解析成 JSON 对象。"""
-    text = _content_to_text(content)
+    raw_text = _content_to_text(content)
+    text = _cleanup_model_text(raw_text)
     if not text:
         return None
+    payload = _try_parse_object(text)
+    if payload is not None:
+        return payload
+    for block in _CODE_BLOCK_RE.findall(text):
+        payload = _try_parse_object(str(block).strip())
+        if payload is not None:
+            return payload
+    json_block = _extract_balanced_json_object(text)
+    if not json_block:
+        return None
+    return _try_parse_object(json_block)
+
+
+def _cleanup_model_text(text: str) -> str:
+    cleaned = str(text).lstrip("\ufeff").strip()
+    if not cleaned:
+        return ""
+    return _THINK_TAG_RE.sub("", _THINKING_TAG_RE.sub("", cleaned)).strip()
+
+
+def _try_parse_object(text: str) -> dict[str, Any] | None:
     try:
         payload = json.loads(text)
     except json.JSONDecodeError:
-        match = _JSON_BLOCK_RE.search(text)
-        if match is None:
-            return None
-        try:
-            payload = json.loads(match.group(0))
-        except json.JSONDecodeError:
-            return None
+        return None
     return payload if isinstance(payload, dict) else None
+
+
+def _extract_balanced_json_object(text: str) -> str:
+    start = -1
+    depth = 0
+    in_string = False
+    escaped = False
+    for index, char in enumerate(text):
+        if start < 0:
+            if char == "{":
+                start = index
+                depth = 1
+            continue
+        if escaped:
+            escaped = False
+            continue
+        if char == "\\":
+            escaped = True
+            continue
+        if char == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if char == "{":
+            depth += 1
+            continue
+        if char == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : index + 1]
+    return ""
+
+
+def _env_truthy(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _content_to_text(content: Any) -> str:

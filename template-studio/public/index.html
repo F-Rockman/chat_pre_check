@@ -47,7 +47,7 @@
             <div class="section-head">
               <div>
                 <h2>一句话生成模板</h2>
-                <p class="muted">输入一句真实问数 query，工作台会调用大模型拆解并生成模板建议。</p>
+                <p class="muted">输入一句真实问数 query，工作台会调用大模型拆解并生成模板建议，同时返回设计理由，方便你手动微调。</p>
               </div>
             </div>
             <div class="generator-grid">
@@ -70,6 +70,10 @@
                     <input id="llm-model" type="text" />
                   </label>
                 </div>
+                <label class="toggle debug-toggle">
+                  <input id="llm-insecure-ssl" type="checkbox" />
+                  <span>关闭 SSL 校验，仅内部调试使用</span>
+                </label>
                 <div class="inline-actions">
                   <button id="generate-template">生成模板建议</button>
                 </div>

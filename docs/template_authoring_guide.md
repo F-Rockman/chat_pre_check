@@ -9,6 +9,22 @@
 如果你当前卡在“参数到底怎么抽、regex 怎么写、哪些参数该交给模板级 LLM”，直接看配套文档：
 
 - [slot_extractors_authoring_guide.md](D:/GitHub/chat_pre_check_blank/docs/slot_extractors_authoring_guide.md)
+- [typical_template_examples.md](D:/GitHub/chat_pre_check_blank/docs/typical_template_examples.md)
+
+## 建议同时维护两层文档
+
+推荐把模板知识分成两层维护：
+
+- 示例层
+  沉淀“这个场景通常怎么起模板骨架”，见 [typical_template_examples.md](D:/GitHub/chat_pre_check_blank/docs/typical_template_examples.md)
+- 指导层
+  解释“为什么这么拆、哪些槽位该必填、哪些冲突要靠约束解决”，也就是当前这份文档
+
+这样分层的好处是：
+
+- 新需求先能快速找到相似示例，不必从零开始写
+- 设计原则和业务示例不会混成一份越来越长的配置手册
+- 后续新增场景时，可以先补示例，再把共性的拆模规律回收进指导文档
 
 ## 适用范围
 
@@ -653,6 +669,61 @@
 
 - 双条件 query 应该优先落到双条件模板
 - 三条件模板不能因为名字像就抢走双条件 query
+
+## 复杂单设备指标查询怎么拆
+
+下面这个场景很典型：
+
+- `查询[时间][ip/mac/名称]为[xxx]的[xx网络设备]的[cpu利用率/内存利用率]的[最大/最小/趋势/平均]`
+
+这个场景建议不要直接按所有维度做笛卡尔拆分，否则模板数量会很快失控。
+
+推荐拆法：
+
+1. 先按“查询形态”拆模板
+2. 再把“定位方式、指标、设备类型”下沉成槽位
+
+第一版通常拆成 2 个模板就够：
+
+- 聚合值模板
+  负责 `最大 / 最小 / 平均`
+- 趋势模板
+  负责 `趋势`
+
+不推荐第一版就拆：
+
+- `ip` 一个模板、`mac` 一个模板、`名称` 一个模板
+- `cpu` 一个模板、`内存` 一个模板
+
+原因：
+
+- `趋势` 和 `最大/最小/平均` 的结果形态不同，是真正的模板边界
+- `ip/mac/名称` 更像“定位同一台设备的不同方式”，更适合做槽位
+- `cpu/内存` 在很多场景下只是 `metric` 的不同取值，不一定要立刻拆模板
+
+推荐槽位设计：
+
+- `selector_type`
+  值域：`ip / mac / name`
+- `selector_value`
+  值域：自由文本或结构化标识
+- `metric`
+  值域：`cpu_usage / memory_usage`
+- `aggregation`
+  仅聚合模板使用，值域：`max / min / avg`
+- `entity_type`
+  如果不同设备类型只是过滤条件，先做可选槽位；如果下游查询逻辑不同，再升级成强约束
+
+关键点：
+
+- 不要把 `selector_ip / selector_mac / selector_name` 都放进 `required_slots`
+- 当前引擎不支持“多选一必填”这种结构
+- 这类场景更适合统一成 `selector_type + selector_value`
+
+补充说明：
+
+- 这个场景的完整骨架见 [typical_template_examples.md](D:/GitHub/chat_pre_check_blank/docs/typical_template_examples.md)
+- 如果你要做趋势模板，记得同步检查全局 `blocked_terms`，避免把 `趋势 / 走势` 提前拦掉
 
 ## 新增模板的推荐流程
 

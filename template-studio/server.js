@@ -16,6 +16,9 @@ const PUBLIC_DIR = path.join(__dirname, "public");
 const WORKSPACE_FILE = path.join(__dirname, "workspace", "current-config.json");
 const DEFAULT_CONFIG_FILE = path.join(ROOT, "configs", "templates.json");
 const PORT = Number(process.env.TEMPLATE_STUDIO_PORT || 3847);
+const DEFAULT_INSECURE_SSL = ["1", "true", "yes", "on"].includes(
+  String(process.env.TEMPLATE_STUDIO_INSECURE_SSL || process.env.OPENAI_INSECURE_SSL || "").toLowerCase()
+);
 
 const app = express();
 app.use(express.json({ limit: "5mb" }));
@@ -34,7 +37,8 @@ app.get("/api/workspace", async (_req, res) => {
     workspacePath: WORKSPACE_FILE,
     llmDefaults: {
       ...DEFAULT_LLM_SETTINGS,
-      apiKey: process.env.DASHSCOPE_API_KEY || ""
+      apiKey: process.env.DASHSCOPE_API_KEY || "",
+      insecureSSL: DEFAULT_INSECURE_SSL
     }
   });
 });
@@ -75,7 +79,8 @@ app.post("/api/llm/generate-template", async (req, res) => {
       currentConfig: normalizeConfig(req.body?.config || {}),
       apiKey: settings.apiKey || process.env.DASHSCOPE_API_KEY || "",
       baseUrl: settings.baseUrl || process.env.DASHSCOPE_BASE_URL || DEFAULT_LLM_SETTINGS.baseUrl,
-      model: settings.model || process.env.DASHSCOPE_MODEL || DEFAULT_LLM_SETTINGS.model
+      model: settings.model || process.env.DASHSCOPE_MODEL || DEFAULT_LLM_SETTINGS.model,
+      insecureSSL: Boolean(settings.insecureSSL ?? DEFAULT_INSECURE_SSL)
     });
     res.json({ ok: true, ...output });
   } catch (error) {

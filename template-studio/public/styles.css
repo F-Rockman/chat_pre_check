@@ -258,6 +258,10 @@ h3 {
   color: var(--muted);
 }
 
+.debug-toggle {
+  margin: 14px 0 0;
+}
+
 .json-editor {
   min-height: 180px;
 }

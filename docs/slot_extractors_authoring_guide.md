@@ -6,6 +6,10 @@
 
 如果上一份文档 [template_authoring_guide.md](D:/GitHub/chat_pre_check_blank/docs/template_authoring_guide.md) 解决的是“模板边界怎么设计”，这份文档解决的就是“模板里参数怎么抽”。
 
+如果你想先找一个完整场景骨架，再回来细化 extractor，可以先看：
+
+- [typical_template_examples.md](D:/GitHub/chat_pre_check_blank/docs/typical_template_examples.md)
+
 ## 先看结论
 
 参数抽取不要追求“大而全”，而要追求“按模板最小可用”。
@@ -256,6 +260,35 @@
 - 任意指标别名
 
 这会迅速失控。枚举不完整时，宁可不要假装它是规则可控的。
+
+### 典型场景：设备定位方式不要拆成多个并行必填槽位
+
+比如这个场景：
+
+- `查询近24小时ip为10.1.1.1的交换机cpu利用率最大值`
+- `昨天mac为aa:bb:cc:dd:ee:ff的路由器内存平均值`
+- `最近7天名称为core-sw-01的网络设备cpu趋势`
+
+这类 query 很容易让人把槽位设计成：
+
+- `selector_ip`
+- `selector_mac`
+- `selector_name`
+
+但当前工程不支持“3 选 1 必填”这种结构，所以不推荐这样做。
+
+更稳的设计是：
+
+- `selector_type`
+  用 `keyword_value` 抽 `ip / mac / name`
+- `selector_value`
+  用 `regex` 按前缀锚点抽真实值
+
+这样做的好处是：
+
+- 模板层更简单
+- `required_slots` 更容易表达
+- 后续扩一个新的定位方式时，只要增加 `selector_type` 的值和一条新 regex
 
 ## `regex` 专项指南
 
@@ -578,6 +611,67 @@
 
 - 只放当前模板真的允许的区域
 - 模板不需要的区域不要硬放
+
+### 设备定位槽位
+
+适合：
+
+- `ip为10.1.1.1`
+- `mac为aa:bb:cc:dd:ee:ff`
+- `名称为core-sw-01`
+
+推荐设计：
+
+- `selector_type` 用 `keyword_value`
+- `selector_value` 用 `regex`
+
+示例：
+
+```jsonc
+"selector_type": {
+  "extractors": [
+    {
+      "type": "keyword_value",
+      "cases": [
+        {"terms": ["ip", "ip地址"], "value": "ip"},
+        {"terms": ["mac", "mac地址"], "value": "mac"},
+        {"terms": ["名称", "设备名", "主机名"], "value": "name"}
+      ]
+    }
+  ]
+},
+"selector_value": {
+  "extractors": [
+    {
+      "type": "regex",
+      "patterns": [
+        {
+          "pattern": "(?:ip|ip地址)\\s*为\\s*([0-9]{1,3}(?:\\.[0-9]{1,3}){3})",
+          "group": 1,
+          "value_type": "string"
+        },
+        {
+          "pattern": "(?:mac|mac地址)\\s*为\\s*([0-9a-f]{2}(?:[:\\-\\s][0-9a-f]{2}){5})",
+          "group": 1,
+          "value_type": "string"
+        },
+        {
+          "pattern": "(?:名称|设备名|主机名)\\s*为\\s*([a-z0-9_.-]+)",
+          "group": 1,
+          "value_type": "string"
+        }
+      ]
+    }
+  ]
+}
+```
+
+建议：
+
+- regex 尽量带前缀锚点，比如 `ip为`、`mac为`、`名称为`
+- 不要写成抓任意字符串，否则很容易把无关片段误抽成设备标识
+- `MAC` 地址要同时接受 `:`、`-`、空格三种分隔形式
+- 如果设备名允许中文或更复杂字符集，要按业务规则再单独放宽
 
 ### 操作槽位
 

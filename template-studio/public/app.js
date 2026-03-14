@@ -8,7 +8,8 @@ const state = {
   llmSettings: {
     apiKey: "",
     baseUrl: "https://coding.dashscope.aliyuncs.com/v1",
-    model: "qwen3-coder-plus"
+    model: "qwen3-coder-plus",
+    insecureSSL: false
   }
 };
 
@@ -30,6 +31,7 @@ const els = {
   llmApiKey: document.getElementById("llm-api-key"),
   llmBaseUrl: document.getElementById("llm-base-url"),
   llmModel: document.getElementById("llm-model"),
+  llmInsecureSsl: document.getElementById("llm-insecure-ssl"),
   matchInput: document.getElementById("match-input"),
   scopeCurrentTemplate: document.getElementById("scope-current-template"),
   runMatch: document.getElementById("run-match"),
@@ -47,7 +49,8 @@ async function bootstrap() {
   state.llmSettings = {
     apiKey: localStorage.getItem("templateStudio.apiKey") || payload.llmDefaults.apiKey || "",
     baseUrl: localStorage.getItem("templateStudio.baseUrl") || payload.llmDefaults.baseUrl,
-    model: localStorage.getItem("templateStudio.model") || payload.llmDefaults.model
+    model: localStorage.getItem("templateStudio.model") || payload.llmDefaults.model,
+    insecureSSL: readBooleanSetting("templateStudio.insecureSSL", payload.llmDefaults.insecureSSL)
   };
   if (state.config.templates.length) {
     state.selectedTemplateId = state.config.templates[0].template_id;
@@ -97,6 +100,7 @@ function bindTopLevelEvents() {
   els.llmApiKey.addEventListener("change", persistLlmSettings);
   els.llmBaseUrl.addEventListener("change", persistLlmSettings);
   els.llmModel.addEventListener("change", persistLlmSettings);
+  els.llmInsecureSsl.addEventListener("change", persistLlmSettings);
   els.runMatch.addEventListener("click", handleRunMatch);
 }
 
@@ -109,6 +113,7 @@ function renderAll() {
   els.llmApiKey.value = state.llmSettings.apiKey;
   els.llmBaseUrl.value = state.llmSettings.baseUrl;
   els.llmModel.value = state.llmSettings.model;
+  els.llmInsecureSsl.checked = Boolean(state.llmSettings.insecureSSL);
 }
 
 function renderWorkspaceMeta() {
@@ -280,6 +285,9 @@ function renderGeneratorResult() {
     return;
   }
   const notes = Array.isArray(state.generated.analysis.notes) ? state.generated.analysis.notes : [];
+  const rationale = Array.isArray(state.generated.analysis.design_rationale)
+    ? state.generated.analysis.design_rationale
+    : [];
   els.generatorResult.className = "generator-result";
   els.generatorResult.innerHTML = `
     <div class="pill-row">
@@ -288,7 +296,9 @@ function renderGeneratorResult() {
       <span class="pill">query_operator: ${escapeHtml(state.generated.analysis.query_operator || "-")}</span>
     </div>
     <p class="muted">${escapeHtml(state.generated.analysis.intent || "模型已返回模板建议。")}</p>
+    ${state.generated.analysis.template_strategy ? `<p class="muted">设计策略：${escapeHtml(state.generated.analysis.template_strategy)}</p>` : ""}
     ${notes.length ? `<ul class="hint-list">${notes.map((note) => `<li>${escapeHtml(note)}</li>`).join("")}</ul>` : ""}
+    ${rationale.length ? `<h3>为什么这样设计</h3><ul class="hint-list">${rationale.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : ""}
     <div class="inline-actions">
       <button id="apply-generated-current">覆盖当前模板</button>
       <button id="apply-generated-new" class="secondary">新增为新模板</button>
@@ -552,7 +562,8 @@ function hydrateLlmSettings() {
   state.llmSettings = {
     apiKey: localStorage.getItem("templateStudio.apiKey") || "",
     baseUrl: localStorage.getItem("templateStudio.baseUrl") || state.llmSettings.baseUrl,
-    model: localStorage.getItem("templateStudio.model") || state.llmSettings.model
+    model: localStorage.getItem("templateStudio.model") || state.llmSettings.model,
+    insecureSSL: readBooleanSetting("templateStudio.insecureSSL", state.llmSettings.insecureSSL)
   };
 }
 
@@ -560,7 +571,8 @@ function syncLlmSettingsFromInputs() {
   state.llmSettings = {
     apiKey: els.llmApiKey.value.trim(),
     baseUrl: els.llmBaseUrl.value.trim(),
-    model: els.llmModel.value.trim()
+    model: els.llmModel.value.trim(),
+    insecureSSL: Boolean(els.llmInsecureSsl.checked)
   };
   persistLlmSettings();
 }
@@ -569,11 +581,13 @@ function persistLlmSettings() {
   state.llmSettings = {
     apiKey: els.llmApiKey.value.trim(),
     baseUrl: els.llmBaseUrl.value.trim(),
-    model: els.llmModel.value.trim()
+    model: els.llmModel.value.trim(),
+    insecureSSL: Boolean(els.llmInsecureSsl.checked)
   };
   localStorage.setItem("templateStudio.apiKey", state.llmSettings.apiKey);
   localStorage.setItem("templateStudio.baseUrl", state.llmSettings.baseUrl);
   localStorage.setItem("templateStudio.model", state.llmSettings.model);
+  localStorage.setItem("templateStudio.insecureSSL", state.llmSettings.insecureSSL ? "1" : "0");
 }
 
 async function api(url, options = {}) {
@@ -596,4 +610,12 @@ function escapeHtml(value) {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
+}
+
+function readBooleanSetting(key, fallback = false) {
+  const raw = localStorage.getItem(key);
+  if (raw == null) {
+    return Boolean(fallback);
+  }
+  return raw === "1" || raw === "true";
 }
