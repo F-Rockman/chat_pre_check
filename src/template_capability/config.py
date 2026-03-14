@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +9,8 @@ from template_capability.models import (
     DEFAULT_LEXICAL_FIELD_WEIGHTS,
     DEFAULT_SCORE_WEIGHTS,
     MatcherSettings,
+    QueryRewriteRule,
+    QueryRewriteSettings,
     SlotExtractorDefinition,
     TemplateDefinition,
 )
@@ -25,14 +27,17 @@ class TemplateConfig:
     """
 
     settings: MatcherSettings
-    slot_extractors: dict[str, SlotExtractorDefinition]
-    templates: list[TemplateDefinition]
+    query_rewrite: QueryRewriteSettings = field(default_factory=QueryRewriteSettings)
+    slot_extractors: dict[str, SlotExtractorDefinition] = field(default_factory=dict)
+    templates: list[TemplateDefinition] = field(default_factory=list)
 
 
 def load_template_config(path: str | Path) -> TemplateConfig:
     """从 JSON 文件加载配置。"""
-    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    config_path = Path(path)
+    payload = json.loads(config_path.read_text(encoding="utf-8"))
     matcher_payload = payload.get("matcher", {})
+    rewrite_payload = payload.get("query_rewrite", {})
     vector_payload = matcher_payload.get("vector", {})
     fallback_payload = matcher_payload.get("llm_fallback", {})
     slot_fallback_payload = matcher_payload.get("llm_slot_fallback", {})
@@ -61,6 +66,23 @@ def load_template_config(path: str | Path) -> TemplateConfig:
         llm_slot_fallback_max_missing_slots=int(slot_fallback_payload.get("max_missing_slots", 2)),
         llm_slot_fallback_min_score=float(slot_fallback_payload.get("min_score", matcher_payload.get("match_threshold", 0.58))),
         llm_slot_fallback_allow_on_matched=bool(slot_fallback_payload.get("allow_on_matched", False)),
+    )
+
+    query_rewrite = QueryRewriteSettings(
+        enabled=bool(rewrite_payload.get("enabled", False)),
+        max_passes=max(1, int(rewrite_payload.get("max_passes", 1))),
+        dictionary_path=_resolve_dictionary_path(
+            rewrite_payload.get("dictionary_path"),
+            base_dir=config_path.parent,
+        ),
+        reload_on_change=bool(rewrite_payload.get("reload_on_change", True)),
+        rules=[
+            rule
+            for index, item in enumerate(rewrite_payload.get("rules", []), start=1)
+            if isinstance(item, dict)
+            for rule in [_build_query_rewrite_rule(item, index)]
+            if rule is not None
+        ],
     )
 
     # 根级 slot_extractors 是共享定义，只在模板本地未覆写时才会生效。
@@ -116,6 +138,7 @@ def load_template_config(path: str | Path) -> TemplateConfig:
     ]
     return TemplateConfig(
         settings=settings,
+        query_rewrite=query_rewrite,
         slot_extractors=slot_extractors,
         templates=templates,
     )
@@ -126,3 +149,27 @@ def _normalize_constraint_values(values: Any) -> list[Any]:
     if isinstance(values, list):
         return values
     return [values]
+
+
+def _build_query_rewrite_rule(item: dict[str, Any], index: int) -> QueryRewriteRule | None:
+    source = str(item.get("source", "")).strip()
+    target = str(item.get("target", "")).strip()
+    if not source or not target:
+        return None
+    return QueryRewriteRule(
+        source=source,
+        target=target,
+        rule_id=str(item.get("rule_id", f"rewrite_rule_{index}")),
+        match_mode=str(item.get("match_mode", "substring") or "substring"),
+    )
+
+
+def _resolve_dictionary_path(raw_path: Any, *, base_dir: Path) -> str | None:
+    if raw_path in (None, ""):
+        return None
+    candidate = Path(str(raw_path))
+    if not candidate.is_absolute():
+        primary = (base_dir / candidate).resolve()
+        fallback = (Path.cwd() / candidate).resolve()
+        candidate = primary if primary.exists() or not fallback.exists() else fallback
+    return str(candidate)

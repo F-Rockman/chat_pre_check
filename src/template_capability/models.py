@@ -24,6 +24,31 @@ DEFAULT_LEXICAL_FIELD_WEIGHTS: dict[str, float] = {
 }
 
 
+@dataclass(slots=True)
+class QueryRewriteRule:
+    """前置 query 改写规则。
+
+    这层规则不参与模板选择，它只负责把行业黑话、别名、内部简称
+    统一改写成模板侧更稳定的表达。
+    """
+
+    source: str
+    target: str
+    rule_id: str = ""
+    match_mode: str = "substring"
+
+
+@dataclass(slots=True)
+class QueryRewriteSettings:
+    """前置 query 改写模块配置。"""
+
+    enabled: bool = False
+    max_passes: int = 1
+    dictionary_path: str | None = None
+    reload_on_change: bool = True
+    rules: list[QueryRewriteRule] = field(default_factory=list)
+
+
 class MatchStatus(str, Enum):
     """模板匹配只区分命中、部分命中、未命中。
 

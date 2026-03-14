@@ -13,6 +13,13 @@ def test_match_interface_alarm_topn():
     assert payload["status"] == "matched"
 
 
+def test_default_config_loads_query_rewrite_dictionary():
+    payload = build_engine().match("过去24小时接口错包告警前10名").to_dict()
+    assert payload["template_id"] == "alarm.interface.error.topn"
+    assert payload["trace"]["rewrite_trace"]["changed"] is True
+    assert payload["trace"]["rewrite_trace"]["rewritten_text"] == "过去24小时接口错误包告警前10名"
+
+
 def test_match_device_cpu_over_list_template():
     payload = build_engine().match("查询最近cpu大于80的设备列表").to_dict()
     assert payload["template_id"] == "device.cpu.over.list"

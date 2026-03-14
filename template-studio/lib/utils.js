@@ -52,6 +52,14 @@ export const DEFAULT_MATCHER = {
   }
 };
 
+export const DEFAULT_QUERY_REWRITE = {
+  enabled: false,
+  max_passes: 1,
+  dictionary_path: "",
+  reload_on_change: true,
+  rules: []
+};
+
 export function deepClone(value) {
   return JSON.parse(JSON.stringify(value));
 }
@@ -124,12 +132,14 @@ export function normalizeConfig(payload) {
   };
 
   const slotExtractors = normalizeSlotExtractorMap(raw.slot_extractors);
+  const queryRewrite = normalizeQueryRewrite(raw.query_rewrite);
   const templates = ensureArray(raw.templates)
     .filter((item) => item && typeof item === "object")
     .map((item, index) => normalizeTemplate(item, index));
 
   return {
     matcher: normalizedMatcher,
+    query_rewrite: queryRewrite,
     slot_extractors: slotExtractors,
     templates
   };
@@ -199,6 +209,26 @@ function normalizeSlotExtractorMap(value) {
       ];
     })
   );
+}
+
+function normalizeQueryRewrite(value) {
+  const input = ensureObject(value);
+  return {
+    ...DEFAULT_QUERY_REWRITE,
+    enabled: Boolean(input.enabled),
+    max_passes: Math.max(1, Number(input.max_passes ?? DEFAULT_QUERY_REWRITE.max_passes)),
+    dictionary_path: String(input.dictionary_path || ""),
+    reload_on_change: Boolean(input.reload_on_change ?? DEFAULT_QUERY_REWRITE.reload_on_change),
+    rules: ensureArray(input.rules)
+      .filter((item) => item && typeof item === "object")
+      .map((item, index) => ({
+        rule_id: String(item.rule_id || `rewrite_rule_${index + 1}`),
+        source: String(item.source || ""),
+        target: String(item.target || ""),
+        match_mode: String(item.match_mode || "substring")
+      }))
+      .filter((item) => item.source.trim() && item.target.trim())
+  };
 }
 
 function normalizeExtractor(extractor) {

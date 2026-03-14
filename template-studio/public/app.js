@@ -339,6 +339,7 @@ function renderMatchResult() {
   }
   const result = state.matchResult;
   const topCandidates = result.trace?.top_candidates || [];
+  const rewriteTrace = result.trace?.rewrite_trace || null;
   els.matchResult.className = "result-panel";
   els.matchResult.innerHTML = `
     <div class="pill-row">
@@ -347,6 +348,8 @@ function renderMatchResult() {
       <span class="pill">score: ${escapeHtml(Number(result.score || 0).toFixed(4))}</span>
       <span class="pill">query_mode: ${escapeHtml(result.query_mode || "-")}</span>
     </div>
+    <h3>前置改写</h3>
+    <pre class="raw-preview">${escapeHtml(formatJson(rewriteTrace || {}))}</pre>
     <h3>抽取槽位</h3>
     <pre class="raw-preview">${escapeHtml(formatJson(result.slots || {}))}</pre>
     <h3>Top Candidates</h3>

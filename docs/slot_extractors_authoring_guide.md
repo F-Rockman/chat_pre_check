@@ -10,6 +10,8 @@
 
 - [typical_template_examples.md](D:/GitHub/chat_pre_check_blank/docs/typical_template_examples.md)
 
+如果你碰到的是“行业黑话、内部简称、别名统一”这类全局问题，先不要急着写 extractor，优先看顶层 `query_rewrite`。
+
 ## 先看结论
 
 参数抽取不要追求“大而全”，而要追求“按模板最小可用”。
@@ -43,6 +45,33 @@
 
 1. 要么用关键词映射固定值
 2. 要么用 regex 抓取文本里的参数
+
+## 先区分：这是改写问题，还是提参问题
+
+下面这两类问题很容易混在一起，但处理位置应该不同。
+
+适合前置 `query_rewrite`：
+
+- `北二小 -> 北京第二小学`
+- `思科设备 -> cisic`
+- `错包 -> 错误包`
+- `cup -> cpu`
+
+适合模板 `slot_extractors`：
+
+- `cpu大于80` 里的 `80`
+- `前10` 里的 `10`
+- `ip为10.1.1.1` 里的设备标识
+
+判断方式：
+
+- 如果它是“先统一说法，再让所有模板一起受益”，优先 `query_rewrite`
+- 如果它是“某个模板内部需要从 query 里抽出一个槽位值”，优先 `slot_extractors`
+
+边界建议：
+
+- 中文短语大多直接用默认 `substring`
+- 英文缩写、设备编码、厂商简称这类容易误伤的表达，更适合 `match_mode = whole_word`
 
 ## 什么时候适合规则抽取，什么时候适合 LLM 补参
 

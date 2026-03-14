@@ -1,0 +1,25 @@
+{
+  "rules": [
+    {
+      "rule_id": "alias.error_packet",
+      "source": "错包",
+      "target": "错误包"
+    },
+    {
+      "rule_id": "alias.cpu_typo",
+      "source": "cup",
+      "target": "cpu",
+      "match_mode": "whole_word"
+    },
+    {
+      "rule_id": "alias.school.short_name",
+      "source": "北二小",
+      "target": "北京第二小学"
+    },
+    {
+      "rule_id": "alias.vendor.cisco",
+      "source": "思科设备",
+      "target": "cisic"
+    }
+  ]
+}

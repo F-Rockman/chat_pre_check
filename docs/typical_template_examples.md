@@ -29,6 +29,63 @@
 2. 按你们自己的实体、指标、业务编码替换字段
 3. 再回到指导文档补齐设计理由和边界判断
 
+## 示例 0：前置行业黑话改写
+
+适合场景：
+
+- 业务里有大量跨模板复用的简称、黑话、内部代号
+- 你希望在进入召回前就先统一说法
+
+典型例子：
+
+- `北二小 -> 北京第二小学`
+- `思科设备 -> cisic`
+- `错包 -> 错误包`
+
+推荐思路：
+
+- 放到顶层 `query_rewrite`
+- 不要塞进某一个模板的 `slot_extractors`
+- 先做全局统一，再让模板按统一后的表达工作
+
+骨架：
+
+```jsonc
+{
+  "query_rewrite": {
+    "enabled": true,
+    "max_passes": 2,
+    "dictionary_path": "configs/query_rewrite_rules.json",
+    "reload_on_change": true,
+    "rules": [
+      {
+        "rule_id": "alias.school.short_name",
+        "source": "北二小",
+        "target": "北京第二小学"
+      },
+      {
+        "rule_id": "alias.vendor.cisco",
+        "source": "思科设备",
+        "target": "cisic"
+      },
+      {
+        "rule_id": "alias.cpu_typo",
+        "source": "cup",
+        "target": "cpu",
+        "match_mode": "whole_word"
+      }
+    ]
+  }
+}
+```
+
+建议：
+
+- `source` 和 `target` 都写成稳定短语，不要写成过宽的单字
+- 让 `query_rewrite` 负责全局说法统一，让模板继续只关心模板语义
+- 需要独立维护时，把规则下沉到 `dictionary_path` 指向的词典文件
+- 英文缩写类规则如果容易误伤，优先加 `match_mode = whole_word`
+
 ## 示例 1：数量类模板
 
 适合问法：

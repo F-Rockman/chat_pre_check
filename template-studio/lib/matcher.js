@@ -14,13 +14,17 @@ import {
   structuralAlignmentScore,
   weightedScore
 } from "./scoring.js";
+import { QueryRewriteStateMachine } from "./rewrite.js";
 import { InMemoryVectorIndex, LocalHashVectorProvider, LocalTfidfVectorProvider } from "./vector.js";
 import { deepClone, normalizeConfig, normalizeText } from "./utils.js";
 
 export class TemplateMatcher {
-  constructor(rawConfig) {
+  constructor(rawConfig, options = {}) {
     this.config = normalizeConfig(rawConfig);
     this.settings = this.config.matcher;
+    this.queryRewriter = new QueryRewriteStateMachine(this.config.query_rewrite, {
+      baseDir: options.baseDir
+    });
     this.templates = Object.fromEntries(this.config.templates.map((template) => [template.template_id, template]));
     this.slotRegistry = buildSlotRegistry(this.config.slot_extractors);
     this.templateSlotRegistries = Object.fromEntries(
@@ -41,7 +45,9 @@ export class TemplateMatcher {
   }
 
   match(inputText, options = {}) {
-    const normText = normalizeText(inputText);
+    const originalNormText = normalizeText(inputText);
+    const rewriteResult = this.queryRewriter.rewriteNormalized(originalNormText);
+    const normText = rewriteResult.rewritten_text;
     const sharedSlots = this.slotRegistry.extract(normText);
     const blockedTerm = this.matchBlockedTerm(normText);
     if (blockedTerm) {
@@ -55,6 +61,8 @@ export class TemplateMatcher {
         metadata: {},
         trace: {
           norm_text: normText,
+          original_norm_text: originalNormText,
+          rewrite_trace: rewriteResult,
           blocked_term: blockedTerm,
           reason: "blocked_intent"
         }
@@ -75,6 +83,8 @@ export class TemplateMatcher {
         metadata: {},
         trace: {
           norm_text: normText,
+          original_norm_text: originalNormText,
+          rewrite_trace: rewriteResult,
           top_candidates: ranked.slice(0, 5),
           threshold: this.settings.match_threshold,
           ambiguity_margin: this.settings.ambiguity_margin
@@ -95,6 +105,8 @@ export class TemplateMatcher {
       metadata: template.metadata,
       trace: {
         norm_text: normText,
+        original_norm_text: originalNormText,
+        rewrite_trace: rewriteResult,
         selected_template: top,
         top_candidates: ranked.slice(0, 5)
       }

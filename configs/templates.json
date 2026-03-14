@@ -48,6 +48,13 @@
       "dimension": 512
     }
   },
+  "query_rewrite": {
+    "enabled": true,
+    "max_passes": 2,
+    "dictionary_path": "configs/query_rewrite_rules.json",
+    "reload_on_change": true,
+    "rules": []
+  },
   "slot_extractors": {},
   "templates": [
     {

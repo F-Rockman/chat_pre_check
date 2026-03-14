@@ -61,7 +61,7 @@ app.post("/api/match", async (req, res) => {
   const text = String(req.body?.text || "");
   const config = normalizeConfig(req.body?.config || (await loadWorkspaceConfig()).config);
   const templateIds = Array.isArray(req.body?.templateIds) ? req.body.templateIds.map(String) : null;
-  const matcher = new TemplateMatcher(config);
+  const matcher = new TemplateMatcher(config, { baseDir: ROOT });
   const result = matcher.match(text, { templateIds });
   res.json({ ok: true, result });
 });

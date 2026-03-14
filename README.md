@@ -33,13 +33,14 @@
 整体链路：
 
 1. `normalize_text`：文本标准化
-2. 文本召回候选模板，不做全局统一提参
-3. `BM25F` + `char ngram` + `vector search`：多路候选召回
-4. 命中候选后，按模板自己的 `slot_extractors` 做模板内提参
-5. `RRF` + 动态权重重排：融合多路召回，按 query 复杂度调权
-6. `slot_fit` + `constraint` + `structure_score`：模板约束和结构校验
-7. 可选模板级 LLM 补参：只在已命中模板上窄触发
-8. 阈值和歧义判断：输出 `matched / partial / unmatched`
+2. 可选 `query_rewrite`：前置行业黑话、别名、内部简称改写
+3. 文本召回候选模板，不做全局统一提参
+4. `BM25F` + `char ngram` + `vector search`：多路候选召回
+5. 命中候选后，按模板自己的 `slot_extractors` 做模板内提参
+6. `RRF` + 动态权重重排：融合多路召回，按 query 复杂度调权
+7. `slot_fit` + `constraint` + `structure_score`：模板约束和结构校验
+8. 可选模板级 LLM 补参：只在已命中模板上窄触发
+9. 阈值和歧义判断：输出 `matched / partial / unmatched`
 
 设计原则：
 
@@ -55,6 +56,7 @@
 ```text
 .
 |-- configs/
+|   |-- query_rewrite_rules.json
 |   `-- templates.json
 |-- src/template_capability/
 |   |-- config.py
@@ -165,6 +167,7 @@ start-template-studio.cmd
 - `missing_slots`：`partial` 时缺失的必填槽位
 - `metadata`：模板透传字段
 - `trace`：调试轨迹，不建议下游业务强依赖
+  其中如果开启了 `query_rewrite`，会看到 `rewrite_trace`
 
 ## 配置说明
 
@@ -181,6 +184,7 @@ start-template-studio.cmd
 ```json
 {
   "matcher": {},
+  "query_rewrite": {},
   "slot_extractors": {},
   "templates": []
 }
@@ -269,6 +273,81 @@ start-template-studio.cmd
 - `allow_on_matched`
   即使已经 `matched`，是否还允许 LLM 二次补参
   默认建议关闭，除非你确实需要补充可选槽位
+
+### query_rewrite
+
+`query_rewrite` 是一个独立的前置改写模块。
+
+它的职责不是选模板，也不是抽槽位，而是在进入召回前先把行业黑话、内部简称、别名统一改写成模板侧更稳定的表达。
+
+推荐放在这里的场景：
+
+- 全局通用别名
+  例如 `北二小 -> 北京第二小学`
+- 领域简称或黑话
+  例如 `错包 -> 错误包`
+- 内部系统名或厂商映射
+  例如 `思科设备 -> cisic`
+
+不推荐放在这里的场景：
+
+- 只在单个模板里才有意义的同义词
+- 需要抽取自由值的槽位
+- 依赖上下文推断才能决定改成什么的复杂语义
+
+当前实现是基于 Trie 状态机的短语改写，特点是：
+
+- 支持最长匹配
+- 支持多轮改写
+- 支持 `whole_word` 边界匹配
+- 支持独立词典文件
+- 支持词典文件热加载
+- 命中轨迹会进入 `trace.rewrite_trace`
+
+示例：
+
+```json
+{
+  "query_rewrite": {
+    "enabled": true,
+    "max_passes": 2,
+    "dictionary_path": "configs/query_rewrite_rules.json",
+    "reload_on_change": true,
+    "rules": [
+      {
+        "rule_id": "alias.school.short_name",
+        "source": "北二小",
+        "target": "北京第二小学"
+      },
+      {
+        "rule_id": "alias.vendor.cisco",
+        "source": "思科设备",
+        "target": "cisic"
+      },
+      {
+        "rule_id": "alias.cpu_typo",
+        "source": "cup",
+        "target": "cpu",
+        "match_mode": "whole_word"
+      }
+    ]
+  }
+}
+```
+
+字段说明：
+
+- `dictionary_path`
+  可选外部词典文件路径；适合把行业黑话和别名单独维护
+- `reload_on_change`
+  是否在运行时检测词典文件变化并热加载
+- `match_mode`
+  当前支持 `substring` 和 `whole_word`
+
+建议：
+
+- 中文短语默认继续用 `substring`
+- 英文缩写、设备编码、厂商简称这类 token 化表达，再考虑 `whole_word`
 
 ### slot_extractors
 

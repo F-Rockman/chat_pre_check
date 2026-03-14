@@ -16,6 +16,7 @@ from template_capability.models import (
     TemplateCandidate,
     TemplateDefinition,
 )
+from template_capability.rewrite import QueryRewriteStateMachine
 from template_capability.scoring import (
     BM25FieldIndex,
     adaptive_score_weights,
@@ -56,6 +57,7 @@ class TemplateCapabilityEngine:
         self.config = config
         self.llm_fallback_resolver = llm_fallback_resolver
         self.llm_template_slot_resolver = llm_template_slot_resolver
+        self.query_rewriter = QueryRewriteStateMachine(config.query_rewrite)
         self.slot_registry = build_slot_registry(config.slot_extractors)
         self.templates = {template.template_id: template for template in config.templates}
         # 每个模板都维护一套独立的槽位抽取器。这样模板之间可以复用槽位名，
@@ -95,7 +97,9 @@ class TemplateCapabilityEngine:
 
         返回时只暴露一个最终模板；如果分数不够或歧义太高，则直接返回 `-1`。
         """
-        norm_text = normalize_text(input_text)
+        original_norm_text = normalize_text(input_text)
+        rewrite_result = self.query_rewriter.rewrite_normalized(original_norm_text)
+        norm_text = rewrite_result.rewritten_text
         # 共享 extractor 只承担非常轻的公共补充作用，真正决定模板是否成立，
         # 仍然以后续“模板内提参”的结果为准。
         shared_slots = self.slot_registry.extract(norm_text)
@@ -111,6 +115,8 @@ class TemplateCapabilityEngine:
                 missing_slots=[],
                 trace={
                     "norm_text": norm_text,
+                    "original_norm_text": original_norm_text,
+                    "rewrite_trace": rewrite_result.to_dict(),
                     "blocked_term": blocked_term,
                     "reason": "blocked_intent",
                 },
@@ -135,6 +141,12 @@ class TemplateCapabilityEngine:
                 base_status=MatchStatus.UNMATCHED,
             )
             if fallback_result is not None:
+                fallback_result.trace.update(
+                    {
+                        "original_norm_text": original_norm_text,
+                        "rewrite_trace": rewrite_result.to_dict(),
+                    }
+                )
                 return fallback_result
             return MatchResult(
                 template_id=-1,
@@ -145,6 +157,8 @@ class TemplateCapabilityEngine:
                 missing_slots=[],
                 trace={
                     "norm_text": norm_text,
+                    "original_norm_text": original_norm_text,
+                    "rewrite_trace": rewrite_result.to_dict(),
                     "top_candidates": [candidate.to_dict() for candidate in ranked[:5]],
                     "threshold": self.config.settings.match_threshold,
                     "ambiguity_margin": self.config.settings.ambiguity_margin,
@@ -185,6 +199,12 @@ class TemplateCapabilityEngine:
                 base_status=status,
             )
             if fallback_result is not None:
+                fallback_result.trace.update(
+                    {
+                        "original_norm_text": original_norm_text,
+                        "rewrite_trace": rewrite_result.to_dict(),
+                    }
+                )
                 return fallback_result
         return MatchResult(
             template_id=template.template_id,
@@ -196,6 +216,8 @@ class TemplateCapabilityEngine:
             metadata=template.metadata,
             trace={
                 "norm_text": norm_text,
+                "original_norm_text": original_norm_text,
+                "rewrite_trace": rewrite_result.to_dict(),
                 "selected_template": top.to_dict(),
                 "top_candidates": [candidate.to_dict() for candidate in display_candidates[:5]],
             },

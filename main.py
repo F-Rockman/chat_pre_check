@@ -26,6 +26,11 @@ DEFAULT_EXAMPLES = [
         "expected_status": "matched",
     },
     {
+        "text": "过去24小时接口错包告警前10名",
+        "expected_template_id": "alarm.interface.error.topn",
+        "expected_status": "matched",
+    },
+    {
         "text": "昨天华东离线设备数",
         "expected_template_id": "device.offline.count",
         "expected_status": "matched",
