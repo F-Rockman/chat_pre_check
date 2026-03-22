@@ -44,7 +44,7 @@
       "allow_on_matched": false
     },
     "vector": {
-      "provider": "hashing",
+      "provider": "local_tfidf",
       "dimension": 512
     }
   },

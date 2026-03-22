@@ -76,6 +76,7 @@
 |   `-- test_engine_capabilities.py
 |-- tools/
 |   |-- evaluate_matcher.py
+|   |-- lint_templates.py
 |   `-- generate_eval_corpus.py
 |-- main.py
 `-- README.md
@@ -112,6 +113,7 @@ python main.py --llm-slot-fallback --input "近24小时接口错误包告警前�
 
 ```bash
 python -m pytest -q
+python tools/lint_templates.py
 ```
 
 本地模板工作台：
@@ -169,6 +171,12 @@ start-template-studio.cmd
 - `metadata`：模板透传字段
 - `trace`：调试轨迹，不建议下游业务强依赖
   其中如果开启了 `query_rewrite`，会看到 `rewrite_trace`
+  当前还会带 `shared_slots / global_slots`
+  候选模板里还会记录 `unexpected_global_slots`
+  用来解释“query 里有哪些高信号条件，但当前模板没接住”
+  如果模板启用了组合槽位约束，还会看到 `requirement_issues`
+  结构分细节会放在候选模板的 `trace.structure_details`
+  如果开启了二阶段精排，还会看到 `rerank_score` 和 `trace.rerank_trace`
 
 ## 配置说明
 
@@ -217,10 +225,23 @@ start-template-studio.cmd
 - `vector.dimension`
   向量维度
   当前主流程按 `512` 维设计，后续替换真实向量接口时保持一致即可
+- `vector.provider`
+  向量后端实现
+  当前支持 `local_tfidf / hashing / remote`
+  默认推荐 `local_tfidf`
+  `remote` 需要额外提供 `base_url / model / api_key` 或 `api_key_env`
+- `reranker`
+  二阶段精排器
+  默认关闭，老配置零影响
+  当前支持 `none / term_overlap / openai_compatible`
+  常见写法是只对初排 top `10-30` 做 rerank
+  如果启用但没有显式写 `weights.rerank`，系统会补一个保守默认值
 - `blocked_terms`
   全局拦截词
   命中后直接返回 `unmatched`
   适合放 `报告 / 分析 / 总结 / 根因 / 预测` 这类明确非问数词
+  默认写字符串即可，等价于 `substring`
+  也支持对象写法：`{"term": "idc", "match_mode": "whole_word"}`
 - `llm_fallback`
   模板选择阶段的 LLM 兜底
   只建议在 `partial` 或接近阈值的 `unmatched` 上窄触发
@@ -244,6 +265,10 @@ start-template-studio.cmd
 - `fusion`
   多路召回经 RRF 融合后的排序分
   用来减少单一路召回偏置
+- `rerank`
+  二阶段精排分
+  只在打开 `matcher.reranker` 时生效
+  推荐只作为 top-k 候选之间的细排信号，不要一开始就给太高
 - `slot_fit`
   槽位覆盖度
   query 抽到的关键参数越齐，分越高
@@ -252,7 +277,26 @@ start-template-studio.cmd
   包括 `must_terms` 命中和 `slot_constraints` 一致性
 - `structure`
   结构一致性分
+  当前会先做一层全局高信号槽位抽取，再判断“query 有的条件模板接不接得住”
   用来惩罚“query 有的条件模板接不住”或“模板要求的关键过滤条件没给全”
+  对关键过滤条件缺失、组合约束未满足、互斥槽位冲突，会比低信号缺失惩罚更重
+
+模板约束支持平滑升级：
+
+- `required_slots`
+  单槽位必填，老模板继续按这个字段工作
+- `required_one_of`
+  一组槽位至少满足一个，适合 `ip / mac / name 三选一`
+- `conditional_required`
+  条件必填，适合“给了 A 就必须给 B”
+- `mutually_exclusive_slots`
+  互斥槽位组，适合多种定位方式不能同时出现的场景
+
+兼容说明：
+
+- 老模板完全不用改
+- `missing_slots` 字段继续保留
+- 更细的规则缺失或冲突原因进入 `trace.requirement_issues`
 
 建议：
 
@@ -260,6 +304,15 @@ start-template-studio.cmd
 - `blocked_terms` 主要放非问数意图词，如 `报告 / 分析 / 根因 / 预测`
 - `llm_fallback` 只建议在 `partial` 或接近阈值的 `unmatched` 上窄触发
 - `llm_slot_fallback` 只建议在 top1 模板已稳定命中、但缺少少量关键参数时触发
+
+文本匹配模式支持：
+
+- `substring`
+  默认模式，完全兼容旧配置
+- `whole_word`
+  适合英文缩写、编码、设备名等 token 化表达
+- `exact`
+  适合必须整句精确匹配的极少数场景
 
 `llm_slot_fallback` 细项：
 
@@ -431,6 +484,9 @@ start-template-studio.cmd
 - `utterances`：示例表达，用于召回和相似度
 - `required_slots`：必填槽位
 - `optional_slots`：可选槽位
+- `required_one_of`：一组槽位至少命中一个
+- `conditional_required`：条件必填规则
+- `mutually_exclusive_slots`：互斥槽位组
 - `must_terms`：必须出现的语义组；每组任一词命中即可
 - `negative_terms`：模板级负向词
 - `slot_constraints`：槽位约束
@@ -449,6 +505,7 @@ start-template-studio.cmd
   这是模板的语义锚点
   每组里命中任意一个词就算该组通过
   如果一个模板很容易和别的模板打架，先加固这里
+  每个词既可以直接写字符串，也可以写成带 `match_mode` 的对象
 - `slot_constraints`
   用来限制抽出来的槽位值必须落在模板允许范围内
   比如 `query_operator` 必须是 `list`，或者 `severity` 必须是 `critical`
@@ -501,6 +558,29 @@ start-template-studio.cmd
   "metadata": {
     "metric_code": "device_offline_count"
   }
+}
+```
+
+如果你需要边界匹配，也可以这样写：
+
+```json
+{
+  "matcher": {
+    "blocked_terms": [
+      {"term": "idc", "match_mode": "whole_word"}
+    ]
+  },
+  "templates": [
+    {
+      "must_terms": [
+        [{"term": "idc", "match_mode": "whole_word"}],
+        ["设备"]
+      ],
+      "negative_terms": [
+        {"term": "分析", "match_mode": "exact"}
+      ]
+    }
+  ]
 }
 ```
 
@@ -714,6 +794,7 @@ LLM 默认只用于离线造测试样本，不用于在线匹配主链路。
 
 当前已提供一个兼容 OpenAI 协议的模板级补参实现：
 
+- [fallback.py](D:/GitHub/chat_pre_check_blank/src/template_capability/fallback.py) 里的 `OpenAICompatibleFallbackResolver`
 - [fallback.py](D:/GitHub/chat_pre_check_blank/src/template_capability/fallback.py) 里的 `OpenAICompatibleTemplateSlotResolver`
 
 当前实现方式：
@@ -721,15 +802,22 @@ LLM 默认只用于离线造测试样本，不用于在线匹配主链路。
 - 使用 `openai` Python SDK
 - 通过 `base_url` 指向兼容 OpenAI 协议的供应商
 - 当前默认示例就是 DashScope 的兼容地址
+- 在线调用时会优先请求 `json_schema` 结构化输出
+- 如果供应商或模型不支持，再自动回退到 `json_object`
+- 即使回退了，仍然会复用当前的 `<think> / fenced json / balanced json` 清洗逻辑兜底
 
 最小可用方式：
 
 1. 设置 `DASHSCOPE_API_KEY`
-2. 使用 [main.py](D:/GitHub/chat_pre_check_blank/main.py) 的 `--llm-slot-fallback`
+2. 使用 [main.py](D:/GitHub/chat_pre_check_blank/main.py) 的 `--llm-fallback` 或 `--llm-slot-fallback`
 3. 只让它在模板已经比较稳定命中、但缺少少量关键参数时补参
 
 当前 `main.py` 额外支持：
 
+- `--llm-fallback`
+- `--llm-base-url`
+- `--llm-model`
+- `--llm-timeout`
 - `--llm-slot-fallback`
 - `--llm-slot-base-url`
 - `--llm-slot-model`
@@ -808,6 +896,7 @@ python -m pytest -q tests/test_live_llm_slot_fallback.py
 - [vector_index.py](D:/GitHub/chat_pre_check_blank/src/template_capability/vector_index.py)：向量后端抽象和默认实现
 - [evaluation.py](D:/GitHub/chat_pre_check_blank/src/template_capability/evaluation.py)：批量评测和报告
 - [config.py](D:/GitHub/chat_pre_check_blank/src/template_capability/config.py)：配置加载
+- [validation.py](D:/GitHub/chat_pre_check_blank/src/template_capability/validation.py)：配置 lint 和启动期校验
 - [models.py](D:/GitHub/chat_pre_check_blank/src/template_capability/models.py)：核心数据模型
 
 ## 常见问题

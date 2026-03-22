@@ -55,6 +55,23 @@
 5. `slot_constraints` 把容易冲突的条件钉死。
 6. `slot_extractors` 只写这个模板真正需要的参数，不做“全局大而全”。
 
+当前还支持 3 个兼容增量字段：
+
+- `required_one_of`
+  用来表达“一组槽位至少满足一个”
+- `conditional_required`
+  用来表达“给了 A 就必须给 B”
+- `mutually_exclusive_slots`
+  用来表达“这几个槽位不能同时出现”
+
+这 3 个字段不会影响旧模板，只有你显式配置了它们才会生效。
+
+另外，`blocked_terms / must_terms / negative_terms` 现在也支持匹配模式：
+
+- 默认字符串写法仍然是 `substring`
+- 需要边界控制时，可以改成对象写法
+- 当前支持 `substring / whole_word / exact`
+
 ## 顶层结构
 
 当前配置文件结构：
@@ -339,6 +356,78 @@
 
 - 缺了就没法执行的核心条件
 
+### `required_one_of`
+
+作用：
+
+- 表达“一组槽位至少给一个”
+
+适合场景：
+
+- `ip / mac / name` 三选一
+- `device_id / device_name` 二选一
+
+推荐：
+
+- 只在多个定位方式本质互斥、但任意一个都能执行时使用
+- 尽量配 `description`，方便 trace 和人工排查
+
+示例：
+
+```jsonc
+"required_one_of": [
+  {
+    "slots": ["selector_ip", "selector_mac", "selector_name"],
+    "description": "至少给一种设备定位方式"
+  }
+]
+```
+
+### `conditional_required`
+
+作用：
+
+- 表达“触发条件出现后，另一些槽位也必须出现”
+
+适合场景：
+
+- 给了 `selector_type`，就必须给 `selector_value`
+- 给了 `query_operator = topn`，就必须给 `topn`
+
+示例：
+
+```jsonc
+"conditional_required": [
+  {
+    "when_any": ["selector_type"],
+    "require": ["selector_value"],
+    "description": "给了定位类型就必须给具体值"
+  }
+]
+```
+
+### `mutually_exclusive_slots`
+
+作用：
+
+- 表达“一组槽位不能同时成立”
+
+适合场景：
+
+- 同一条 query 里不能同时给 `selector_ip` 和 `selector_name`
+- 两种互斥定位方式不应该混用
+
+示例：
+
+```jsonc
+"mutually_exclusive_slots": [
+  {
+    "slots": ["selector_ip", "selector_name"],
+    "description": "同一次查询里不要同时给 ip 和名称"
+  }
+]
+```
+
 ### `must_terms`
 
 作用：
@@ -371,6 +460,8 @@
 
 - 每一组只放一类同义词
 - 一个模板一般 3 到 6 组
+- 默认继续直接写字符串
+- 英文缩写、设备编码、设备名这类 token 化表达，再考虑 `whole_word`
 
 不推荐写法：
 
@@ -384,6 +475,16 @@
 
 - 这会把完全不同的概念混成一组
 - 只要命中其中一个就算通过，约束力几乎没有
+
+如果你需要边界匹配，可以写成对象：
+
+```jsonc
+"must_terms": [
+  [{"term": "idc", "match_mode": "whole_word"}],
+  ["设备"],
+  ["数量", "多少"]
+]
+```
 
 ### `negative_terms`
 
@@ -411,6 +512,12 @@
 什么时候可以只靠全局 `blocked_terms`：
 
 - 所有模板都不应该接受的词
+
+匹配模式建议：
+
+- 中文短语默认继续用 `substring`
+- 英文缩写、设备编码、厂商简称，再考虑 `whole_word`
+- `exact` 只在你真的要整句完全相等时再用
 
 ### `slot_constraints`
 
@@ -767,7 +874,7 @@
 关键点：
 
 - 不要把 `selector_ip / selector_mac / selector_name` 都放进 `required_slots`
-- 当前引擎不支持“多选一必填”这种结构
+- 现在可以用 `required_one_of` 表达“多选一必填”
 - 这类场景更适合统一成 `selector_type + selector_value`
 
 补充说明：

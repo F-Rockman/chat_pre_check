@@ -6,14 +6,21 @@ from pathlib import Path
 from typing import Any
 
 from template_capability.models import (
+    build_text_match_groups,
+    build_text_match_rules,
+    ConditionalSlotRequirement,
     DEFAULT_LEXICAL_FIELD_WEIGHTS,
+    DEFAULT_RERANKER_PROVIDER,
     DEFAULT_SCORE_WEIGHTS,
+    DEFAULT_VECTOR_PROVIDER,
     MatcherSettings,
     QueryRewriteRule,
     QueryRewriteSettings,
+    SlotGroupRequirement,
     SlotExtractorDefinition,
     TemplateDefinition,
 )
+from template_capability.validation import validate_template_config, validate_template_payload
 
 
 @dataclass(slots=True)
@@ -36,20 +43,26 @@ def load_template_config(path: str | Path) -> TemplateConfig:
     """从 JSON 文件加载配置。"""
     config_path = Path(path)
     payload = json.loads(config_path.read_text(encoding="utf-8"))
+    # 启动期先做一次严格 lint，避免坏配置静默进入运行态。
+    validate_template_payload(payload)
     matcher_payload = payload.get("matcher", {})
     rewrite_payload = payload.get("query_rewrite", {})
     vector_payload = matcher_payload.get("vector", {})
+    reranker_payload = matcher_payload.get("reranker", {})
     fallback_payload = matcher_payload.get("llm_fallback", {})
     slot_fallback_payload = matcher_payload.get("llm_slot_fallback", {})
+    weights = {
+        str(key): float(value)
+        for key, value in matcher_payload.get("weights", {}).items()
+    } or dict(DEFAULT_SCORE_WEIGHTS)
+    reranker_weight = reranker_payload.get("weight")
+    if reranker_weight not in (None, "") and "rerank" not in weights:
+        weights["rerank"] = float(reranker_weight)
     settings = MatcherSettings(
         match_threshold=float(matcher_payload.get("match_threshold", 0.58)),
         ambiguity_margin=float(matcher_payload.get("ambiguity_margin", 0.03)),
         recall_top_k=int(matcher_payload.get("recall_top_k", 30)),
-        weights={
-            str(key): float(value)
-            for key, value in matcher_payload.get("weights", {}).items()
-        }
-        or dict(DEFAULT_SCORE_WEIGHTS),
+        weights=weights,
         lexical_field_weights={
             str(key): float(value)
             for key, value in matcher_payload.get("lexical_field_weights", {}).items()
@@ -57,7 +70,13 @@ def load_template_config(path: str | Path) -> TemplateConfig:
         or dict(DEFAULT_LEXICAL_FIELD_WEIGHTS),
         fusion_rrf_k=int(matcher_payload.get("fusion_rrf_k", 60)),
         vector_dimension=int(vector_payload.get("dimension", 512)),
-        blocked_terms=[str(term) for term in matcher_payload.get("blocked_terms", [])],
+        vector_provider=str(vector_payload.get("provider", DEFAULT_VECTOR_PROVIDER) or DEFAULT_VECTOR_PROVIDER),
+        vector_options=_build_vector_options(vector_payload),
+        reranker_enabled=bool(reranker_payload.get("enabled", False)),
+        reranker_provider=str(reranker_payload.get("provider", DEFAULT_RERANKER_PROVIDER) or DEFAULT_RERANKER_PROVIDER),
+        reranker_top_k=max(1, int(reranker_payload.get("top_k", 15))),
+        reranker_options=_build_reranker_options(reranker_payload),
+        blocked_terms=build_text_match_rules(matcher_payload.get("blocked_terms", [])),
         llm_fallback_enabled=bool(fallback_payload.get("enabled", False)),
         llm_fallback_max_candidates=int(fallback_payload.get("max_candidates", 3)),
         llm_fallback_score_margin=float(fallback_payload.get("score_margin", 0.08)),
@@ -108,16 +127,15 @@ def load_template_config(path: str | Path) -> TemplateConfig:
             utterances=[str(text) for text in item.get("utterances", [])],
             required_slots=[str(slot) for slot in item.get("required_slots", [])],
             optional_slots=[str(slot) for slot in item.get("optional_slots", [])],
-            must_terms=[
-                [str(term) for term in group]
-                for group in item.get("must_terms", [])
-                if isinstance(group, list) and group
-            ],
-            negative_terms=[str(term) for term in item.get("negative_terms", [])],
+            must_terms=build_text_match_groups(item.get("must_terms", [])),
+            negative_terms=build_text_match_rules(item.get("negative_terms", [])),
             slot_constraints={
                 str(slot_name): _normalize_constraint_values(values)
                 for slot_name, values in item.get("slot_constraints", {}).items()
             },
+            required_one_of=_build_slot_group_requirements(item.get("required_one_of", [])),
+            conditional_required=_build_conditional_slot_requirements(item.get("conditional_required", [])),
+            mutually_exclusive_slots=_build_slot_group_requirements(item.get("mutually_exclusive_slots", [])),
             slot_extractors={
                 str(slot_name): SlotExtractorDefinition(
                     slot_name=str(slot_name),
@@ -136,12 +154,14 @@ def load_template_config(path: str | Path) -> TemplateConfig:
         for item in payload.get("templates", [])
         if isinstance(item, dict)
     ]
-    return TemplateConfig(
+    config = TemplateConfig(
         settings=settings,
         query_rewrite=query_rewrite,
         slot_extractors=slot_extractors,
         templates=templates,
     )
+    validate_template_config(config)
+    return config
 
 
 def _normalize_constraint_values(values: Any) -> list[Any]:
@@ -173,3 +193,71 @@ def _resolve_dictionary_path(raw_path: Any, *, base_dir: Path) -> str | None:
         fallback = (Path.cwd() / candidate).resolve()
         candidate = primary if primary.exists() or not fallback.exists() else fallback
     return str(candidate)
+
+
+def _build_vector_options(vector_payload: dict[str, Any]) -> dict[str, Any]:
+    """保留 provider 的附加配置，供 remote 模式直接透传。"""
+    return {
+        str(key): value
+        for key, value in vector_payload.items()
+        if key not in {"provider", "dimension"}
+    }
+
+
+def _build_reranker_options(reranker_payload: dict[str, Any]) -> dict[str, Any]:
+    """保留 reranker 的附加配置，方便 provider 自己解释。"""
+    return {
+        str(key): value
+        for key, value in reranker_payload.items()
+        if key not in {"enabled", "provider", "top_k", "weight"}
+    }
+
+
+def _build_slot_group_requirements(value: Any) -> list[SlotGroupRequirement]:
+    """兼容 `[['ip', 'mac']]` 和 `[{slots: [...], description: ...}]` 两种写法。"""
+    if not isinstance(value, list):
+        return []
+    groups: list[SlotGroupRequirement] = []
+    for item in value:
+        if isinstance(item, list):
+            slots = _normalize_slot_name_list(item)
+            description = ""
+        elif isinstance(item, dict):
+            slots = _normalize_slot_name_list(item.get("slots", []))
+            description = str(item.get("description", ""))
+        else:
+            continue
+        if not slots:
+            continue
+        groups.append(SlotGroupRequirement(slots=slots, description=description))
+    return groups
+
+
+def _build_conditional_slot_requirements(value: Any) -> list[ConditionalSlotRequirement]:
+    """兼容配置层的条件必填规则。"""
+    if not isinstance(value, list):
+        return []
+    rules: list[ConditionalSlotRequirement] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        require = _normalize_slot_name_list(item.get("require", []))
+        when_any = _normalize_slot_name_list(item.get("when_any", []))
+        when_all = _normalize_slot_name_list(item.get("when_all", []))
+        if not require:
+            continue
+        rules.append(
+            ConditionalSlotRequirement(
+                require=require,
+                when_any=when_any,
+                when_all=when_all,
+                description=str(item.get("description", "")),
+            )
+        )
+    return rules
+
+
+def _normalize_slot_name_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(slot).strip() for slot in value if str(slot).strip()]

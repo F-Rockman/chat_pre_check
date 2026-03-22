@@ -14,7 +14,7 @@ if str(SRC) not in sys.path:
 
 from template_capability.config import load_template_config
 from template_capability.engine import TemplateCapabilityEngine
-from template_capability.fallback import OpenAICompatibleTemplateSlotResolver
+from template_capability.fallback import OpenAICompatibleFallbackResolver, OpenAICompatibleTemplateSlotResolver
 
 # 这组样例承担两个职责：
 # 1. 给开发者一个开箱即跑的 CLI 演示入口
@@ -129,6 +129,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", default="configs/templates.json")
     parser.add_argument("--input", default="", help="Run a single input text")
     parser.add_argument("--interactive", action="store_true")
+    # 模板选择级 fallback 只在边界 case 上裁决候选，不做全模板推理。
+    parser.add_argument("--llm-fallback", action="store_true")
+    parser.add_argument("--llm-base-url", default=os.environ.get("DASHSCOPE_BASE_URL", "https://coding.dashscope.aliyuncs.com/v1"))
+    parser.add_argument("--llm-model", default=os.environ.get("DASHSCOPE_MODEL", "qwen3-coder-plus"))
+    parser.add_argument("--llm-timeout", type=float, default=5.0)
     # 这里的 LLM 只用于“模板已命中后的定向补参”，不是全量模板推理。
     parser.add_argument("--llm-slot-fallback", action="store_true")
     parser.add_argument("--llm-slot-base-url", default=os.environ.get("DASHSCOPE_BASE_URL", "https://coding.dashscope.aliyuncs.com/v1"))
@@ -167,20 +172,34 @@ def main() -> None:
     """
     args = parse_args()
     config = load_template_config(args.config)
-    resolver = None
-    if args.llm_slot_fallback:
-        api_key = os.environ.get("DASHSCOPE_API_KEY")
+    fallback_resolver = None
+    slot_resolver = None
+    api_key = os.environ.get("DASHSCOPE_API_KEY")
+    if args.llm_fallback or args.llm_slot_fallback:
         if not api_key:
             raise SystemExit("Missing DASHSCOPE_API_KEY in environment.")
+    if args.llm_fallback:
+        config.settings.llm_fallback_enabled = True
+        fallback_resolver = OpenAICompatibleFallbackResolver(
+            api_key=api_key or "",
+            base_url=args.llm_base_url,
+            model=args.llm_model,
+            timeout_seconds=args.llm_timeout,
+        )
+    if args.llm_slot_fallback:
         # 一旦显式打开 CLI 开关，就同步打开配置里的模板级补参总开关。
         config.settings.llm_slot_fallback_enabled = True
-        resolver = OpenAICompatibleTemplateSlotResolver(
-            api_key=api_key,
+        slot_resolver = OpenAICompatibleTemplateSlotResolver(
+            api_key=api_key or "",
             base_url=args.llm_slot_base_url,
             model=args.llm_slot_model,
             timeout_seconds=args.llm_slot_timeout,
         )
-    engine = TemplateCapabilityEngine(config, llm_template_slot_resolver=resolver)
+    engine = TemplateCapabilityEngine(
+        config,
+        llm_fallback_resolver=fallback_resolver,
+        llm_template_slot_resolver=slot_resolver,
+    )
     if args.interactive:
         run_interactive(engine)
         return

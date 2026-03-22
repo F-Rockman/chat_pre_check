@@ -11,6 +11,12 @@ from template_capability.openai_client import (
     extract_chat_completion_content,
     parse_json_content,
 )
+from template_capability.structured_output import (
+    build_json_object_response_format,
+    build_json_schema_response_format,
+    build_slot_fill_schema,
+    build_template_selection_schema,
+)
 
 
 @dataclass(slots=True)
@@ -58,6 +64,213 @@ class LLMTemplateSlotResolver(Protocol):
     ) -> SlotFallbackSuggestion | None:
         ...
 
+
+@dataclass(slots=True)
+class OpenAICompatibleFallbackResolver:
+    """面向 OpenAI 兼容协议的模板选择级 fallback。
+
+    它不做全模板推理，只在当前 top candidates 里做裁决，或者明确返回 `-1`。
+    """
+
+    api_key: str
+    base_url: str
+    model: str
+    timeout_seconds: float = 5.0
+    prefer_json_schema: bool = True
+    client: Any | None = field(default=None, repr=False, compare=False)
+
+    def resolve(
+        self,
+        *,
+        input_text: str,
+        normalized_text: str,
+        slots: dict[str, Any],
+        candidates: list[TemplateCandidate],
+        templates: dict[str, TemplateDefinition],
+    ) -> FallbackSuggestion | None:
+        if not candidates:
+            return None
+        candidate_ids = [candidate.template_id for candidate in candidates]
+        start = time.perf_counter()
+        payload = {
+            "model": self.model,
+            "temperature": 0,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "You arbitrate between a small set of candidate metric-query templates. "
+                        "Only choose one of the provided candidate template ids, or return -1 when none is reliable."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": self._build_prompt(
+                        input_text=input_text,
+                        normalized_text=normalized_text,
+                        slots=slots,
+                        candidates=candidates,
+                        templates=templates,
+                    ),
+                },
+            ],
+        }
+        raw, response_format_mode = self._post_json_with_schema(
+            payload=payload,
+            schema_name="template_selection_fallback",
+            schema=build_template_selection_schema(candidate_ids),
+        )
+        elapsed_ms = (time.perf_counter() - start) * 1000.0
+        if raw is None:
+            return None
+        return self._coerce_selection(
+            raw,
+            candidates=candidates,
+            templates=templates,
+            elapsed_ms=elapsed_ms,
+            response_format_mode=response_format_mode,
+        )
+
+    def _build_prompt(
+        self,
+        *,
+        input_text: str,
+        normalized_text: str,
+        slots: dict[str, Any],
+        candidates: list[TemplateCandidate],
+        templates: dict[str, TemplateDefinition],
+    ) -> str:
+        candidate_payload = []
+        for candidate in candidates:
+            template = templates[candidate.template_id]
+            candidate_payload.append(
+                {
+                    "template_id": candidate.template_id,
+                    "description": template.description,
+                    "utterances": template.utterances[:5],
+                    "required_slots": template.required_slots,
+                    "required_one_of": [group.to_dict() for group in template.required_one_of],
+                    "conditional_required": [rule.to_dict() for rule in template.conditional_required],
+                    "mutually_exclusive_slots": [group.to_dict() for group in template.mutually_exclusive_slots],
+                    "must_terms": [[rule.term for rule in group] for group in template.must_terms],
+                    "negative_terms": [rule.term for rule in template.negative_terms],
+                    "slot_constraints": template.slot_constraints,
+                    "current_slots": candidate.slots,
+                    "missing_slots": candidate.missing_slots,
+                    "base_score": round(candidate.score, 6),
+                    "candidate_trace": candidate.trace,
+                }
+            )
+        return (
+            f"input_text: {input_text}\n"
+            f"normalized_text: {normalized_text}\n"
+            f"global_slots: {json.dumps(slots, ensure_ascii=False)}\n"
+            f"candidates: {json.dumps(candidate_payload, ensure_ascii=False)}\n"
+            "Choose the candidate that best explains the query constraints, or return -1 if none is reliable. "
+            "If a candidate is already right but misses one or two obvious values, you may fill those missing slots. "
+            "Do not invent a template id that is not listed."
+        )
+
+    def _coerce_selection(
+        self,
+        raw: dict[str, Any],
+        *,
+        candidates: list[TemplateCandidate],
+        templates: dict[str, TemplateDefinition],
+        elapsed_ms: float,
+        response_format_mode: str,
+    ) -> FallbackSuggestion | None:
+        candidate_map = {candidate.template_id: candidate for candidate in candidates}
+        template_token = str(raw.get("template_id", "")).strip()
+        if not template_token:
+            return None
+        reason = str(raw.get("reason", "")).strip()
+        if template_token == "-1":
+            return FallbackSuggestion(
+                template_id=-1,
+                status=MatchStatus.UNMATCHED,
+                score=0.0,
+                query_mode=None,
+                trace={
+                    "provider": "openai_compatible",
+                    "model": self.model,
+                    "response_format_mode": response_format_mode,
+                    "elapsed_ms": round(elapsed_ms, 2),
+                    "reason": reason,
+                },
+            )
+
+        candidate = candidate_map.get(template_token)
+        template = templates.get(template_token)
+        if candidate is None or template is None:
+            return None
+
+        supplemental_slots = raw.get("slots")
+        merged_slots = _merge_missing_slots_only(candidate.slots, supplemental_slots if isinstance(supplemental_slots, dict) else {})
+        raw_missing_slots = raw.get("missing_slots")
+        if isinstance(raw_missing_slots, list):
+            missing_slots = [str(slot_name) for slot_name in raw_missing_slots if str(slot_name).strip()]
+        else:
+            missing_slots = list(candidate.missing_slots)
+
+        raw_status = str(raw.get("status", "")).strip().lower()
+        if raw_status == MatchStatus.UNMATCHED.value:
+            status = MatchStatus.UNMATCHED
+        elif raw_status == MatchStatus.MATCHED.value:
+            status = MatchStatus.MATCHED
+        elif raw_status == MatchStatus.PARTIAL.value:
+            status = MatchStatus.PARTIAL
+        else:
+            status = MatchStatus.PARTIAL if missing_slots else MatchStatus.MATCHED
+
+        score = _coerce_score(raw.get("score"), default=candidate.score)
+        return FallbackSuggestion(
+            template_id=template.template_id,
+            status=status,
+            score=score,
+            query_mode=template.query_mode,
+            slots=merged_slots,
+            missing_slots=missing_slots,
+            metadata=template.metadata,
+            trace={
+                "provider": "openai_compatible",
+                "model": self.model,
+                "response_format_mode": response_format_mode,
+                "elapsed_ms": round(elapsed_ms, 2),
+                "reason": reason,
+            },
+        )
+
+    def _post_json_with_schema(
+        self,
+        *,
+        payload: dict[str, Any],
+        schema_name: str,
+        schema: dict[str, Any],
+    ) -> tuple[dict[str, Any] | None, str]:
+        if self.prefer_json_schema:
+            json_schema_payload = dict(payload)
+            json_schema_payload["response_format"] = build_json_schema_response_format(name=schema_name, schema=schema)
+            parsed = self._post_json(json_schema_payload)
+            if parsed is not None:
+                return parsed, "json_schema"
+        json_object_payload = dict(payload)
+        json_object_payload["response_format"] = build_json_object_response_format()
+        return self._post_json(json_object_payload), "json_object"
+
+    def _post_json(self, payload: dict[str, Any]) -> dict[str, Any] | None:
+        try:
+            client = self.client or build_openai_client(
+                api_key=self.api_key,
+                base_url=self.base_url,
+                timeout_seconds=self.timeout_seconds,
+            )
+            response = client.chat.completions.create(**payload)
+        except Exception:
+            return None
+        return parse_json_content(extract_chat_completion_content(response))
+
+
 @dataclass(slots=True)
 class OpenAICompatibleTemplateSlotResolver:
     """面向 OpenAI 兼容协议的模板级补参实现。"""
@@ -65,6 +278,7 @@ class OpenAICompatibleTemplateSlotResolver:
     base_url: str
     model: str
     timeout_seconds: float = 5.0
+    prefer_json_schema: bool = True
     client: Any | None = field(default=None, repr=False, compare=False)
 
     def resolve_slots(
@@ -109,16 +323,18 @@ class OpenAICompatibleTemplateSlotResolver:
                     ),
                 },
             ],
-            # 要求供应商直接返回 JSON，减少后处理和幻觉解释文本。
-            "response_format": {"type": "json_object"},
         }
-        raw = self._post_json(payload)
+        raw, response_format_mode = self._post_json_with_schema(
+            payload=payload,
+            schema_name="template_slot_fill",
+            schema=build_slot_fill_schema(template, target_slots),
+        )
         elapsed_ms = (time.perf_counter() - start) * 1000.0
         if raw is None:
             return None
-        slots_payload = raw.get("slots")
+        slots_payload = self._coerce_slots_payload(raw.get("slots"), target_slots)
         # 这里只接受 {"slots": {...}} 这一种窄格式，避免把模型自由文本当结果。
-        if not isinstance(slots_payload, dict) or not slots_payload:
+        if not slots_payload:
             return None
         return SlotFallbackSuggestion(
             slots=slots_payload,
@@ -126,6 +342,8 @@ class OpenAICompatibleTemplateSlotResolver:
                 "provider": "openai_compatible",
                 "model": self.model,
                 "target_slots": target_slots,
+                "response_format_mode": response_format_mode,
+                "reason": str(raw.get("reason", "")).strip(),
                 "elapsed_ms": round(elapsed_ms, 2),
             },
         )
@@ -149,6 +367,9 @@ class OpenAICompatibleTemplateSlotResolver:
             f"template_id: {template.template_id}\n"
             f"description: {template.description}\n"
             f"required_slots: {template.required_slots}\n"
+            f"required_one_of: {[group.to_dict() for group in template.required_one_of]}\n"
+            f"conditional_required: {[rule.to_dict() for rule in template.conditional_required]}\n"
+            f"mutually_exclusive_slots: {[group.to_dict() for group in template.mutually_exclusive_slots]}\n"
             f"optional_slots: {template.optional_slots}\n"
             f"target_slots: {target_slots}\n"
             f"current_slots: {json.dumps(current_slots, ensure_ascii=False)}\n"
@@ -211,6 +432,37 @@ class OpenAICompatibleTemplateSlotResolver:
                 hints[slot_name] = slot_hint
         return hints
 
+    def _coerce_slots_payload(
+        self,
+        raw_slots: Any,
+        target_slots: list[str],
+    ) -> dict[str, Any]:
+        if not isinstance(raw_slots, dict):
+            return {}
+        allowed = set(target_slots)
+        return {
+            str(slot_name): value
+            for slot_name, value in raw_slots.items()
+            if str(slot_name) in allowed and value is not None
+        }
+
+    def _post_json_with_schema(
+        self,
+        *,
+        payload: dict[str, Any],
+        schema_name: str,
+        schema: dict[str, Any],
+    ) -> tuple[dict[str, Any] | None, str]:
+        if self.prefer_json_schema:
+            json_schema_payload = dict(payload)
+            json_schema_payload["response_format"] = build_json_schema_response_format(name=schema_name, schema=schema)
+            parsed = self._post_json(json_schema_payload)
+            if parsed is not None:
+                return parsed, "json_schema"
+        json_object_payload = dict(payload)
+        json_object_payload["response_format"] = build_json_object_response_format()
+        return self._post_json(json_object_payload), "json_object"
+
     def _post_json(self, payload: dict[str, Any]) -> dict[str, Any] | None:
         """用 openai 客户端发起 chat completion，并解析成 JSON。"""
         try:
@@ -224,3 +476,20 @@ class OpenAICompatibleTemplateSlotResolver:
             # fallback 失败不应该打断主链路，所以统一吞掉异常并返回 None。
             return None
         return parse_json_content(extract_chat_completion_content(response))
+
+
+def _merge_missing_slots_only(base_slots: dict[str, Any], supplemental_slots: dict[str, Any]) -> dict[str, Any]:
+    """LLM 只补充缺失值，不覆盖规则链路已经稳定产出的槽位。"""
+    merged = dict(base_slots)
+    for slot_name, value in supplemental_slots.items():
+        if slot_name not in merged or merged.get(slot_name) in (None, ""):
+            merged[slot_name] = value
+    return merged
+
+
+def _coerce_score(raw_value: Any, *, default: float) -> float:
+    try:
+        value = float(raw_value)
+    except (TypeError, ValueError):
+        return default
+    return max(0.0, min(1.0, value))

@@ -90,7 +90,7 @@ def test_template_slot_resolver_uses_openai_sdk_client():
     assert suggestion.slots == {"topn": 10}
     assert chat.calls
     assert chat.calls[0]["model"] == "fake-model"
-    assert chat.calls[0]["response_format"] == {"type": "json_object"}
+    assert chat.calls[0]["response_format"]["type"] in {"json_schema", "json_object"}
 
 
 def test_generate_corpus_uses_openai_sdk_client():

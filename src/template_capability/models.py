@@ -23,6 +23,11 @@ DEFAULT_LEXICAL_FIELD_WEIGHTS: dict[str, float] = {
     "must_terms": 1.6,
 }
 
+DEFAULT_VECTOR_PROVIDER = "local_tfidf"
+DEFAULT_RERANKER_PROVIDER = "none"
+DEFAULT_RERANK_WEIGHT = 0.12
+SUPPORTED_TEXT_MATCH_MODES = {"substring", "whole_word", "exact"}
+
 
 @dataclass(slots=True)
 class QueryRewriteRule:
@@ -47,6 +52,28 @@ class QueryRewriteSettings:
     dictionary_path: str | None = None
     reload_on_change: bool = True
     rules: list[QueryRewriteRule] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class TextMatchRule:
+    """文本匹配规则。
+
+    默认仍然使用 `substring`，这样老模板和老配置完全不需要改。
+    只有显式声明 `whole_word / exact` 时，才会启用更严格的边界匹配。
+    """
+
+    term: str
+    match_mode: str = "substring"
+
+    def __post_init__(self) -> None:
+        self.term = str(self.term or "").strip()
+        self.match_mode = str(self.match_mode or "substring").strip().lower()
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "term": self.term,
+            "match_mode": self.match_mode,
+        }
 
 
 class MatchStatus(str, Enum):
@@ -88,8 +115,20 @@ class MatcherSettings:
     fusion_rrf_k: int = 60
     # 向量召回约定的 embedding 维度，便于外部向量服务接入时保持一致。
     vector_dimension: int = 512
+    # 向量 provider 名称，允许通过配置在本地 tfidf / hashing / remote 之间切换。
+    vector_provider: str = DEFAULT_VECTOR_PROVIDER
+    # provider 额外参数，例如 remote 模式下的 base_url / model / api_key_env。
+    vector_options: dict[str, Any] = field(default_factory=dict)
+    # 二阶段 reranker 默认关闭；打开后只对 top-k 候选做更贵的精排。
+    reranker_enabled: bool = False
+    # 当前内置 `none / term_overlap / openai_compatible`，后续可以平滑扩展。
+    reranker_provider: str = DEFAULT_RERANKER_PROVIDER
+    # 只对初排前几名做 rerank，控制额外时延和成本。
+    reranker_top_k: int = 15
+    # reranker 的附加参数，例如 remote 模式下的 base_url / model / api_key_env。
+    reranker_options: dict[str, Any] = field(default_factory=dict)
     # 全局负向意图词，命中后直接短路为 UNMATCHED。
-    blocked_terms: list[str] = field(default_factory=list)
+    blocked_terms: list[TextMatchRule] = field(default_factory=list)
     # 模板选择级 LLM fallback，总开关。
     llm_fallback_enabled: bool = False
     # 模板选择级 fallback 最多看多少个 top 候选。
@@ -113,6 +152,12 @@ class MatcherSettings:
             self.weights = dict(DEFAULT_SCORE_WEIGHTS)
         if not self.lexical_field_weights:
             self.lexical_field_weights = dict(DEFAULT_LEXICAL_FIELD_WEIGHTS)
+        self.vector_provider = str(self.vector_provider or DEFAULT_VECTOR_PROVIDER).strip().lower()
+        self.reranker_provider = str(self.reranker_provider or DEFAULT_RERANKER_PROVIDER).strip().lower()
+        if self.reranker_enabled and "rerank" not in self.weights:
+            # 只有显式打开 reranker 时，才自动补一个保守权重，避免老配置被无意改变。
+            self.weights["rerank"] = DEFAULT_RERANK_WEIGHT
+        self.blocked_terms = build_text_match_rules(self.blocked_terms)
 
 
 @dataclass(slots=True)
@@ -126,6 +171,47 @@ class SlotExtractorDefinition:
     slot_name: str
     # extractor 按顺序尝试，先命中的规则优先级更高。
     extractors: list[dict[str, Any]]
+
+
+@dataclass(slots=True)
+class SlotGroupRequirement:
+    """一组槽位的组合规则。
+
+    这类结构被两个场景复用：
+    1. `required_one_of`: 至少命中一个
+    2. `mutually_exclusive_slots`: 最多命中一个
+    """
+
+    slots: list[str]
+    description: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "slots": list(self.slots),
+            "description": self.description,
+        }
+
+
+@dataclass(slots=True)
+class ConditionalSlotRequirement:
+    """条件必填规则。
+
+    当 `when_any` / `when_all` 触发后，`require` 里的槽位必须被填充，
+    适合表达“给了 A 就必须给 B”“A+B 出现时必须补 C”这类约束。
+    """
+
+    require: list[str]
+    when_any: list[str] = field(default_factory=list)
+    when_all: list[str] = field(default_factory=list)
+    description: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "require": list(self.require),
+            "when_any": list(self.when_any),
+            "when_all": list(self.when_all),
+            "description": self.description,
+        }
 
 
 @dataclass(slots=True)
@@ -154,17 +240,27 @@ class TemplateDefinition:
     # 这些槽位会提升模板完整度，但缺失时不阻止命中。
     optional_slots: list[str]
     # 必须命中的词组列表；每组内是近义词关系，组与组之间是“都要满足”。
-    must_terms: list[list[str]]
+    must_terms: list[list[TextMatchRule]]
     # 负向排斥词，只要命中就明确说明“不该走这个模板”。
-    negative_terms: list[str]
+    negative_terms: list[TextMatchRule]
     # 对抽取值的显式限制，例如某个槽位只能是特定枚举值。
     slot_constraints: dict[str, list[Any]]
+    # 至少满足一项即可的槽位组，适合表达“ip / mac / name 三选一”。
+    required_one_of: list["SlotGroupRequirement"] = field(default_factory=list)
+    # 条件必填规则，适合表达“如果给了 A，就必须给 B”。
+    conditional_required: list["ConditionalSlotRequirement"] = field(default_factory=list)
+    # 互斥槽位组，适合表达“ip / mac / name 不能同时给多个”。
+    mutually_exclusive_slots: list["SlotGroupRequirement"] = field(default_factory=list)
     # 模板自己的槽位抽取器。它优先于根级共享定义。
     slot_extractors: dict[str, "SlotExtractorDefinition"] = field(default_factory=dict)
     # 模板级 LLM 补参配置，只在模板已基本命中后才会使用。
     llm_slot_extraction: dict[str, Any] = field(default_factory=dict)
     # 业务附加信息，原样透传到匹配结果里，不参与排序。
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        self.must_terms = build_text_match_groups(self.must_terms)
+        self.negative_terms = build_text_match_rules(self.negative_terms)
 
 
 @dataclass(slots=True)
@@ -184,12 +280,14 @@ class TemplateCandidate:
     sample_score: float
     vector_score: float
     fusion_score: float
+    rerank_score: float
     slot_fit_score: float
     constraint_score: float
     structure_score: float
     # 这是“按该模板自己的 extractor”抽出来的槽位，不是全局抽参结果。
     slots: dict[str, Any]
-    # 当前模板如果想成为 MATCHED，还缺哪些 required_slots。
+    # 当前模板如果想成为 MATCHED，还缺哪些槽位。
+    # 这里兼容保留旧字段名，但内容可能来自 required_slots / one_of / conditional_required。
     missing_slots: list[str]
     # 预留给更细的诊断轨迹，例如 LLM 补参耗时、重排原因。
     trace: dict[str, Any] = field(default_factory=dict)
@@ -206,6 +304,7 @@ class TemplateCandidate:
             "sample_score": self.sample_score,
             "vector_score": self.vector_score,
             "fusion_score": self.fusion_score,
+            "rerank_score": self.rerank_score,
             "slot_fit_score": self.slot_fit_score,
             "constraint_score": self.constraint_score,
             "structure_score": self.structure_score,
@@ -236,6 +335,7 @@ class MatchResult:
     # 最终确认可用的槽位集合。
     slots: dict[str, Any] = field(default_factory=dict)
     # 对 partial 场景尤其关键，告诉外部还差哪些必要参数。
+    # 这里兼容保留旧字段名，但内容可能来自更丰富的约束规则。
     missing_slots: list[str] = field(default_factory=list)
     # 透传模板 metadata，供业务侧做后续路由或展示。
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -253,3 +353,76 @@ class MatchResult:
             "metadata": self.metadata,
             "trace": self.trace,
         }
+
+
+def template_declared_slot_names(template: TemplateDefinition) -> set[str]:
+    """收集模板显式声明过的所有槽位名。
+
+    这层聚合用于三类场景：
+    1. 构建模板可见 extractor 集合
+    2. 结构分判断“query 条件模板能不能接住”
+    3. 配置校验判断规则里引用的槽位是否有填充路径
+    """
+
+    declared_slots = (
+        set(template.required_slots)
+        | set(template.optional_slots)
+        | set(template.slot_constraints)
+        | set(template.slot_extractors)
+    )
+    for group in template.required_one_of:
+        declared_slots.update(group.slots)
+    for rule in template.conditional_required:
+        declared_slots.update(rule.when_any)
+        declared_slots.update(rule.when_all)
+        declared_slots.update(rule.require)
+    for group in template.mutually_exclusive_slots:
+        declared_slots.update(group.slots)
+    return declared_slots
+
+
+def build_text_match_rule(value: Any) -> TextMatchRule | None:
+    """兼容字符串写法和对象写法。
+
+    支持：
+    - `"cpu"`
+    - `{"term": "cpu", "match_mode": "whole_word"}`
+    """
+
+    if isinstance(value, TextMatchRule):
+        return TextMatchRule(term=value.term, match_mode=value.match_mode)
+    if isinstance(value, dict):
+        term = str(value.get("term", value.get("text", ""))).strip()
+        match_mode = str(value.get("match_mode", "substring") or "substring")
+    else:
+        term = str(value).strip()
+        match_mode = "substring"
+    if not term:
+        return None
+    return TextMatchRule(term=term, match_mode=match_mode)
+
+
+def build_text_match_rules(values: Any) -> list[TextMatchRule]:
+    if not isinstance(values, list):
+        return []
+    rules: list[TextMatchRule] = []
+    for value in values:
+        rule = build_text_match_rule(value)
+        if rule is None:
+            continue
+        rules.append(rule)
+    return rules
+
+
+def build_text_match_groups(values: Any) -> list[list[TextMatchRule]]:
+    if not isinstance(values, list):
+        return []
+    groups: list[list[TextMatchRule]] = []
+    for group in values:
+        if not isinstance(group, list):
+            continue
+        rules = build_text_match_rules(group)
+        if not rules:
+            continue
+        groups.append(rules)
+    return groups

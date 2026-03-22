@@ -6,12 +6,87 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
-from template_capability.models import TemplateDefinition
+from template_capability.extractors import normalize_text
+from template_capability.models import TemplateDefinition, template_declared_slot_names
+from template_capability.text_matching import match_text_rule
 
 
 TOKEN_RE = re.compile(r"[a-z0-9_.-]+|[\u4e00-\u9fff]+")
 LOW_SIGNAL_SLOTS = {"time_range", "region_id"}
-FILTER_SLOTS = {"topn", "severity", "device_id", "protocol"}
+FILTER_SLOTS = {"query_operator", "topn", "severity", "device_id", "protocol", "selector_type", "selector_value"}
+
+
+@dataclass(slots=True)
+class RequirementIssue:
+    """单条槽位规则诊断。"""
+
+    kind: str
+    slots: list[str]
+    message: str
+    trigger_slots: list[str] = field(default_factory=list)
+    description: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "slots": list(self.slots),
+            "message": self.message,
+            "trigger_slots": list(self.trigger_slots),
+            "description": self.description,
+        }
+
+
+@dataclass(slots=True)
+class SlotRequirementReport:
+    """模板槽位约束的综合评估结果。"""
+
+    missing_slots: list[str] = field(default_factory=list)
+    issues: list[RequirementIssue] = field(default_factory=list)
+
+    @property
+    def is_satisfied(self) -> bool:
+        return not self.issues
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "missing_slots": list(self.missing_slots),
+            "issues": [issue.to_dict() for issue in self.issues],
+            "blocking_issue_count": len(self.issues),
+        }
+
+
+@dataclass(slots=True)
+class StructureAlignmentReport:
+    """结构分诊断结果。"""
+
+    score: float
+    support_coverage_score: float
+    capture_score: float
+    filter_capture_score: float
+    requirement_completeness_score: float
+    key_requirement_penalty: float
+    soft_requirement_penalty: float
+    conflict_penalty: float
+    unsupported_query_slots: list[str] = field(default_factory=list)
+    uncaptured_supported_slots: list[str] = field(default_factory=list)
+    missing_requirement_slots: list[str] = field(default_factory=list)
+    conflict_slots: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "score": self.score,
+            "support_coverage_score": self.support_coverage_score,
+            "capture_score": self.capture_score,
+            "filter_capture_score": self.filter_capture_score,
+            "requirement_completeness_score": self.requirement_completeness_score,
+            "key_requirement_penalty": self.key_requirement_penalty,
+            "soft_requirement_penalty": self.soft_requirement_penalty,
+            "conflict_penalty": self.conflict_penalty,
+            "unsupported_query_slots": list(self.unsupported_query_slots),
+            "uncaptured_supported_slots": list(self.uncaptured_supported_slots),
+            "missing_requirement_slots": list(self.missing_requirement_slots),
+            "conflict_slots": list(self.conflict_slots),
+        }
 
 
 def mixed_terms(text: str) -> list[str]:
@@ -233,11 +308,25 @@ def reciprocal_rank_fusion(
 
 def slot_fit_score(template: TemplateDefinition, slots: dict[str, Any]) -> float:
     """衡量当前模板需要的槽位被填得有多完整。"""
+    requirement_scores: list[float] = []
     required = template.required_slots
     optional = template.optional_slots
-    if not required and not optional:
-        return 1.0
-    required_hit = _coverage_score(required, slots)
+    if required:
+        requirement_scores.append(_coverage_score(required, slots))
+    if template.required_one_of:
+        requirement_scores.append(
+            sum(_one_of_group_score(group.slots, slots) for group in template.required_one_of)
+            / len(template.required_one_of)
+        )
+    active_conditional_scores = _conditional_requirement_scores(template, slots)
+    if active_conditional_scores:
+        requirement_scores.append(sum(active_conditional_scores) / len(active_conditional_scores))
+    if template.mutually_exclusive_slots:
+        requirement_scores.append(
+            sum(_mutual_exclusion_score(group.slots, slots) for group in template.mutually_exclusive_slots)
+            / len(template.mutually_exclusive_slots)
+        )
+    required_hit = sum(requirement_scores) / len(requirement_scores) if requirement_scores else 1.0
     if not optional:
         return required_hit
     optional_hit = _coverage_score(optional, slots)
@@ -246,67 +335,142 @@ def slot_fit_score(template: TemplateDefinition, slots: dict[str, Any]) -> float
 
 def structural_alignment_score(
     template: TemplateDefinition,
-    slots: dict[str, Any],
+    *,
+    query_slots: dict[str, Any],
+    candidate_slots: dict[str, Any],
+    requirement_report: SlotRequirementReport | None = None,
 ) -> float:
-    """衡量“抽出来的条件”和“模板能表达的条件”是否同构。
+    """兼容旧调用方，只返回结构分数值。"""
+    return evaluate_structural_alignment(
+        template,
+        query_slots=query_slots,
+        candidate_slots=candidate_slots,
+        requirement_report=requirement_report,
+    ).score
 
-    这里既惩罚 query 里多出的条件，也惩罚模板要求但 query 没给全的关键过滤条件。
-    """
-    extracted_slots = {
+
+def evaluate_structural_alignment(
+    template: TemplateDefinition,
+    *,
+    query_slots: dict[str, Any],
+    candidate_slots: dict[str, Any],
+    requirement_report: SlotRequirementReport | None = None,
+) -> StructureAlignmentReport:
+    """衡量“query 条件集合”和“模板实际接住的条件集合”是否同构。"""
+    requirement_report = requirement_report or evaluate_slot_requirements(template, candidate_slots)
+    extracted_query_slots = {
         slot_name
-        for slot_name, value in slots.items()
+        for slot_name, value in query_slots.items()
         if value not in (None, "")
     }
-    if not extracted_slots:
-        return 0.0
-    supported_slots = (
-        set(template.required_slots)
-        | set(template.optional_slots)
-        | set(template.slot_constraints)
-    )
+    extracted_candidate_slots = {
+        slot_name
+        for slot_name, value in candidate_slots.items()
+        if value not in (None, "")
+    }
+    if not extracted_query_slots:
+        return StructureAlignmentReport(
+            score=0.0,
+            support_coverage_score=0.0,
+            capture_score=0.0,
+            filter_capture_score=0.0,
+            requirement_completeness_score=_requirement_completeness_score(template, candidate_slots),
+            key_requirement_penalty=1.0,
+            soft_requirement_penalty=1.0,
+            conflict_penalty=1.0,
+            missing_requirement_slots=list(requirement_report.missing_slots),
+            conflict_slots=_conflict_slots_from_report(requirement_report),
+        )
+    supported_slots = template_declared_slot_names(template)
     if not supported_slots:
-        return 0.0
+        return StructureAlignmentReport(
+            score=0.0,
+            support_coverage_score=0.0,
+            capture_score=0.0,
+            filter_capture_score=0.0,
+            requirement_completeness_score=0.0,
+            key_requirement_penalty=1.0,
+            soft_requirement_penalty=1.0,
+            conflict_penalty=1.0,
+            unsupported_query_slots=sorted(extracted_query_slots),
+            uncaptured_supported_slots=[],
+            missing_requirement_slots=list(requirement_report.missing_slots),
+            conflict_slots=_conflict_slots_from_report(requirement_report),
+        )
 
-    total_weight = sum(_slot_signal_weight(slot_name) for slot_name in extracted_slots)
-    unexpected_slots = extracted_slots - supported_slots
-    # query 里多抽出来但模板不支持的条件，会拉低 coverage，
-    # 解决“多条件 query 错配到单条件模板”的问题。
+    total_weight = sum(_slot_signal_weight(slot_name) for slot_name in extracted_query_slots)
+    unexpected_slots = extracted_query_slots - supported_slots
+    # query 里出现但模板不支持的条件，会直接拉低结构分。
     unexpected_weight = sum(_slot_signal_weight(slot_name) for slot_name in unexpected_slots)
     coverage_score = 1.0 - unexpected_weight / max(1.0, total_weight)
 
-    # 没有过滤条件时，不再强求更复杂的结构完整度。
-    extracted_filter_slots = {slot_name for slot_name in extracted_slots if _is_filter_slot(slot_name)}
-    if not extracted_filter_slots:
-        return clamp_score(coverage_score)
+    supported_query_slots = extracted_query_slots & supported_slots
+    if not supported_query_slots:
+        return StructureAlignmentReport(
+            score=clamp_score(coverage_score),
+            support_coverage_score=clamp_score(coverage_score),
+            capture_score=0.0,
+            filter_capture_score=0.0,
+            requirement_completeness_score=_requirement_completeness_score(template, candidate_slots),
+            key_requirement_penalty=1.0,
+            soft_requirement_penalty=1.0,
+            conflict_penalty=1.0,
+            unsupported_query_slots=sorted(unexpected_slots),
+            uncaptured_supported_slots=[],
+            missing_requirement_slots=list(requirement_report.missing_slots),
+            conflict_slots=_conflict_slots_from_report(requirement_report),
+        )
 
-    supported_filter_slots = {slot_name for slot_name in supported_slots if _is_filter_slot(slot_name)}
-    matched_filter_weight = sum(
+    supported_query_weight = sum(_slot_signal_weight(slot_name) for slot_name in supported_query_slots)
+    captured_slots = supported_query_slots & extracted_candidate_slots
+    captured_weight = sum(_slot_signal_weight(slot_name) for slot_name in captured_slots)
+    captured_score = captured_weight / max(1.0, supported_query_weight)
+    uncaptured_supported_slots = sorted(supported_query_slots - extracted_candidate_slots)
+
+    # 没有过滤条件时，结构分主要看 query 条件是否被模板真正接住。
+    extracted_filter_slots = {slot_name for slot_name in supported_query_slots if _is_filter_slot(slot_name)}
+    captured_filter_slots = extracted_filter_slots & extracted_candidate_slots
+    captured_filter_weight = sum(
         _slot_signal_weight(slot_name)
-        for slot_name in extracted_filter_slots
-        if slot_name in supported_filter_slots
+        for slot_name in captured_filter_slots
     )
     filter_total_weight = sum(_slot_signal_weight(slot_name) for slot_name in extracted_filter_slots)
-    filter_score = matched_filter_weight / max(1.0, filter_total_weight)
-    required_filter_slots = {
-        slot_name
-        for slot_name in template.required_slots
-        if _is_filter_slot(slot_name)
-    }
-    if not required_filter_slots:
-        return clamp_score(0.55 * coverage_score + 0.45 * filter_score)
-
-    # 对必须出现的过滤条件再单独算一遍完整度，避免 query 缺半个条件时仍被高分放过。
-    required_filter_weight = sum(_slot_signal_weight(slot_name) for slot_name in required_filter_slots)
-    matched_required_filter_weight = sum(
-        _slot_signal_weight(slot_name)
-        for slot_name in required_filter_slots
-        if slot_name in extracted_filter_slots
+    filter_score = (
+        captured_filter_weight / max(1.0, filter_total_weight)
+        if extracted_filter_slots
+        else captured_score
     )
-    completeness_score = matched_required_filter_weight / max(1.0, required_filter_weight)
-    return clamp_score(
-        0.45 * coverage_score
-        + 0.3 * filter_score
-        + 0.25 * completeness_score
+    requirement_completeness_score = _requirement_completeness_score(template, candidate_slots)
+    key_requirement_penalty, soft_requirement_penalty, conflict_penalty = _requirement_penalties(
+        template,
+        requirement_report,
+        query_slots=query_slots,
+    )
+    base_score = clamp_score(
+        0.3 * coverage_score
+        + 0.25 * captured_score
+        + 0.25 * filter_score
+        + 0.2 * requirement_completeness_score
+    )
+    score = clamp_score(
+        base_score
+        * key_requirement_penalty
+        * soft_requirement_penalty
+        * conflict_penalty
+    )
+    return StructureAlignmentReport(
+        score=score,
+        support_coverage_score=clamp_score(coverage_score),
+        capture_score=clamp_score(captured_score),
+        filter_capture_score=clamp_score(filter_score),
+        requirement_completeness_score=clamp_score(requirement_completeness_score),
+        key_requirement_penalty=clamp_score(key_requirement_penalty),
+        soft_requirement_penalty=clamp_score(soft_requirement_penalty),
+        conflict_penalty=clamp_score(conflict_penalty),
+        unsupported_query_slots=sorted(unexpected_slots),
+        uncaptured_supported_slots=uncaptured_supported_slots,
+        missing_requirement_slots=list(requirement_report.missing_slots),
+        conflict_slots=_conflict_slots_from_report(requirement_report),
     )
 
 
@@ -316,8 +480,8 @@ def constraint_score(
     slots: dict[str, Any],
 ) -> float:
     """计算模板自身显式约束是否满足。"""
-    lowered = text.lower()
-    if has_negative_term(template, lowered):
+    normalized_text = normalize_text(text)
+    if has_negative_term(template, normalized_text):
         return 0.0
 
     must_score = 1.0
@@ -325,7 +489,7 @@ def constraint_score(
         matched_groups = 0
         for group in template.must_terms:
             # must_terms 按组计算，只要求每组里任意一个近义词命中即可。
-            if any(term.lower() in lowered for term in group):
+            if any(match_text_rule(normalized_text, rule) for rule in group):
                 matched_groups += 1
         must_score = matched_groups / len(template.must_terms)
 
@@ -346,8 +510,8 @@ def constraint_score(
 
 def has_negative_term(template: TemplateDefinition, text: str) -> bool:
     """只要命中模板负向词，就视为该模板不该匹配。"""
-    lowered = text.lower()
-    return any(term.lower() in lowered for term in template.negative_terms)
+    normalized_text = normalize_text(text)
+    return any(match_text_rule(normalized_text, rule) for rule in template.negative_terms)
 
 
 def weighted_score(parts: dict[str, float], weights: dict[str, float]) -> float:
@@ -397,12 +561,102 @@ def clamp_score(score: float) -> float:
 
 
 def missing_required_slots(template: TemplateDefinition, slots: dict[str, Any]) -> list[str]:
-    """列出当前模板还缺哪些必填槽位。"""
-    return [
+    """兼容旧调用方，返回所有阻塞 MATCHED 的缺失槽位。"""
+    return evaluate_slot_requirements(template, slots).missing_slots
+
+
+def evaluate_slot_requirements(
+    template: TemplateDefinition,
+    slots: dict[str, Any],
+) -> SlotRequirementReport:
+    """统一评估模板的必填、条件必填和互斥规则。
+
+    这层是向后兼容的关键：
+    - 老模板只配 `required_slots` 时，行为和以前一致
+    - 新模板可以叠加 `required_one_of / conditional_required / mutually_exclusive_slots`
+    """
+
+    missing_slots: list[str] = []
+    issues: list[RequirementIssue] = []
+
+    missing_required = [
         slot_name
         for slot_name in template.required_slots
-        if slots.get(slot_name) in (None, "")
+        if not _slot_present(slots, slot_name)
     ]
+    if missing_required:
+        _extend_unique(missing_slots, missing_required)
+        for slot_name in missing_required:
+            issues.append(
+                RequirementIssue(
+                    kind="required_slot",
+                    slots=[slot_name],
+                    message=f"required slot '{slot_name}' is missing.",
+                )
+            )
+
+    for group in template.required_one_of:
+        filled_slots = [slot_name for slot_name in group.slots if _slot_present(slots, slot_name)]
+        if filled_slots:
+            continue
+        _extend_unique(missing_slots, group.slots)
+        issues.append(
+            RequirementIssue(
+                kind="required_one_of",
+                slots=list(group.slots),
+                message=(
+                    group.description
+                    or f"at least one of [{', '.join(group.slots)}] must be provided."
+                ),
+                description=group.description,
+            )
+        )
+
+    for rule in template.conditional_required:
+        trigger_slots = _triggered_slots(rule.when_any, rule.when_all, slots)
+        if not trigger_slots:
+            continue
+        missing_required_by_rule = [
+            slot_name
+            for slot_name in rule.require
+            if not _slot_present(slots, slot_name)
+        ]
+        if not missing_required_by_rule:
+            continue
+        _extend_unique(missing_slots, missing_required_by_rule)
+        issues.append(
+            RequirementIssue(
+                kind="conditional_required",
+                slots=missing_required_by_rule,
+                trigger_slots=trigger_slots,
+                message=(
+                    rule.description
+                    or f"when [{', '.join(trigger_slots)}] is present, [{', '.join(missing_required_by_rule)}] is also required."
+                ),
+                description=rule.description,
+            )
+        )
+
+    for group in template.mutually_exclusive_slots:
+        filled_slots = [slot_name for slot_name in group.slots if _slot_present(slots, slot_name)]
+        if len(filled_slots) <= 1:
+            continue
+        issues.append(
+            RequirementIssue(
+                kind="mutually_exclusive_slots",
+                slots=filled_slots,
+                message=(
+                    group.description
+                    or f"only one of [{', '.join(group.slots)}] can be provided at the same time."
+                ),
+                description=group.description,
+            )
+        )
+
+    return SlotRequirementReport(
+        missing_slots=missing_slots,
+        issues=issues,
+    )
 
 
 def _coverage_score(slot_names: list[str], slots: dict[str, Any]) -> float:
@@ -411,6 +665,90 @@ def _coverage_score(slot_names: list[str], slots: dict[str, Any]) -> float:
         return 1.0
     hit = sum(1 for slot_name in slot_names if slots.get(slot_name) not in (None, ""))
     return hit / len(slot_names)
+
+
+def _one_of_group_score(slot_names: list[str], slots: dict[str, Any]) -> float:
+    if not slot_names:
+        return 1.0
+    return 1.0 if any(_slot_present(slots, slot_name) for slot_name in slot_names) else 0.0
+
+
+def _conditional_requirement_scores(template: TemplateDefinition, slots: dict[str, Any]) -> list[float]:
+    scores: list[float] = []
+    for rule in template.conditional_required:
+        if not _triggered_slots(rule.when_any, rule.when_all, slots):
+            continue
+        scores.append(_coverage_score(rule.require, slots))
+    return scores
+
+
+def _mutual_exclusion_score(slot_names: list[str], slots: dict[str, Any]) -> float:
+    filled_count = sum(1 for slot_name in slot_names if _slot_present(slots, slot_name))
+    return 1.0 if filled_count <= 1 else 0.0
+
+
+def _requirement_completeness_score(template: TemplateDefinition, slots: dict[str, Any]) -> float:
+    """把模板自己的必填规则聚合成一个完整度分数。"""
+    weighted_components: list[tuple[float, float]] = []
+    for slot_name in template.required_slots:
+        weighted_components.append(
+            (_slot_signal_weight(slot_name), 1.0 if _slot_present(slots, slot_name) else 0.0)
+        )
+    for group in template.required_one_of:
+        group_weight = max((_slot_signal_weight(slot_name) for slot_name in group.slots), default=1.0)
+        weighted_components.append(
+            (group_weight, 1.0 if any(_slot_present(slots, slot_name) for slot_name in group.slots) else 0.0)
+        )
+    for rule in template.conditional_required:
+        if not _triggered_slots(rule.when_any, rule.when_all, slots):
+            continue
+        for slot_name in rule.require:
+            weighted_components.append(
+                (_slot_signal_weight(slot_name), 1.0 if _slot_present(slots, slot_name) else 0.0)
+            )
+    if not weighted_components:
+        return 1.0
+    total_weight = sum(weight for weight, _ in weighted_components)
+    satisfied_weight = sum(weight * value for weight, value in weighted_components)
+    return satisfied_weight / max(1.0, total_weight)
+
+
+def _requirement_penalties(
+    template: TemplateDefinition,
+    requirement_report: SlotRequirementReport,
+    *,
+    query_slots: dict[str, Any],
+) -> tuple[float, float, float]:
+    """把缺槽位和冲突规则转成结构分惩罚项。"""
+    query_weight = sum(
+        _slot_signal_weight(slot_name)
+        for slot_name, value in query_slots.items()
+        if value not in (None, "")
+    )
+    required_weight = _template_requirement_weight(template)
+    normalizer = max(1.0, query_weight, required_weight)
+
+    key_issue_weight = 0.0
+    soft_issue_weight = 0.0
+    conflict_issue_weight = 0.0
+    for issue in requirement_report.issues:
+        issue_weight = _requirement_issue_weight(issue)
+        if issue.kind == "mutually_exclusive_slots":
+            conflict_issue_weight += issue_weight
+            continue
+        if any(_is_key_signal_slot(slot_name) for slot_name in issue.slots):
+            key_issue_weight += issue_weight
+            continue
+        soft_issue_weight += issue_weight
+
+    key_penalty = 1.0 - 0.55 * min(1.0, key_issue_weight / normalizer)
+    soft_penalty = 1.0 - 0.25 * min(1.0, soft_issue_weight / normalizer)
+    conflict_penalty = 1.0 - 0.45 * min(1.0, conflict_issue_weight / normalizer)
+    return (
+        clamp_score(key_penalty),
+        clamp_score(soft_penalty),
+        clamp_score(conflict_penalty),
+    )
 
 
 def _contains_cjk(text: str) -> bool:
@@ -458,6 +796,38 @@ def _slot_signal_weight(slot_name: str) -> float:
     return 1.0
 
 
+def _template_requirement_weight(template: TemplateDefinition) -> float:
+    total = sum(_slot_signal_weight(slot_name) for slot_name in template.required_slots)
+    for group in template.required_one_of:
+        total += max((_slot_signal_weight(slot_name) for slot_name in group.slots), default=1.0)
+    for rule in template.conditional_required:
+        total += sum(_slot_signal_weight(slot_name) for slot_name in rule.require)
+    for group in template.mutually_exclusive_slots:
+        total += sum(_slot_signal_weight(slot_name) for slot_name in group.slots) / max(1, len(group.slots))
+    return total or 1.0
+
+
+def _requirement_issue_weight(issue: RequirementIssue) -> float:
+    if issue.kind == "required_one_of":
+        return max((_slot_signal_weight(slot_name) for slot_name in issue.slots), default=1.0)
+    if issue.kind == "mutually_exclusive_slots":
+        return sum(_slot_signal_weight(slot_name) for slot_name in issue.slots) / max(1, len(issue.slots))
+    return sum(_slot_signal_weight(slot_name) for slot_name in issue.slots) or 1.0
+
+
+def _conflict_slots_from_report(requirement_report: SlotRequirementReport) -> list[str]:
+    conflict_slots: list[str] = []
+    for issue in requirement_report.issues:
+        if issue.kind != "mutually_exclusive_slots":
+            continue
+        _extend_unique(conflict_slots, issue.slots)
+    return conflict_slots
+
+
+def _is_key_signal_slot(slot_name: str) -> bool:
+    return slot_name not in LOW_SIGNAL_SLOTS
+
+
 def _is_filter_slot(slot_name: str) -> bool:
     return slot_name.endswith("_threshold") or slot_name in FILTER_SLOTS
 
@@ -468,3 +838,39 @@ def _normalize_weights(weights: dict[str, float]) -> dict[str, float]:
     if total <= 0:
         return weights
     return {name: max(0.0, value) / total for name, value in weights.items()}
+
+
+def _slot_present(slots: dict[str, Any], slot_name: str) -> bool:
+    return slots.get(slot_name) not in (None, "")
+
+
+def _triggered_slots(
+    when_any: list[str],
+    when_all: list[str],
+    slots: dict[str, Any],
+) -> list[str]:
+    """返回实际触发条件必填规则的槽位列表。"""
+
+    triggered: list[str] = []
+    if when_all:
+        missing_when_all = [slot_name for slot_name in when_all if not _slot_present(slots, slot_name)]
+        if missing_when_all:
+            return []
+        triggered.extend(when_all)
+    if when_any:
+        matched_when_any = [slot_name for slot_name in when_any if _slot_present(slots, slot_name)]
+        if not matched_when_any:
+            return []
+        triggered.extend(matched_when_any)
+    if not when_any and not when_all:
+        return []
+    return list(dict.fromkeys(triggered))
+
+
+def _extend_unique(target: list[str], values: list[str]) -> None:
+    seen = set(target)
+    for value in values:
+        if value in seen:
+            continue
+        target.append(value)
+        seen.add(value)

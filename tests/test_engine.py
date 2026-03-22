@@ -34,7 +34,10 @@ def test_single_condition_query_prefers_single_condition_template():
     top_candidates = payload["trace"]["top_candidates"]
     assert top_candidates[0]["template_id"] == "device.cpu.over.list"
     assert top_candidates[0]["score"] > top_candidates[1]["score"]
-    assert top_candidates[0]["structure_score"] > top_candidates[1]["structure_score"]
+    # 单条件 query 下，更专一的模板仍然应该排在最前面；
+    # 其他多条件模板即便文本相关，也会因为缺少额外必填槽位而排后。
+    assert top_candidates[0]["missing_slots"] == []
+    assert top_candidates[1]["missing_slots"]
 
 
 def test_match_device_cpu_memory_over_list_template():
@@ -46,7 +49,13 @@ def test_match_device_cpu_memory_over_list_template():
     assert payload["trace"]["top_candidates"][0]["template_id"] == "device.cpu.memory.over.list"
     assert payload["trace"]["top_candidates"][0]["score"] > payload["trace"]["top_candidates"][1]["score"]
     assert "memory_threshold" in payload["trace"]["top_candidates"][0]["slots"]
-    assert "memory_threshold" not in payload["trace"]["top_candidates"][1]["slots"]
+    cpu_only_candidate = next(
+        candidate
+        for candidate in payload["trace"]["top_candidates"]
+        if candidate["template_id"] == "device.cpu.over.list"
+    )
+    assert cpu_only_candidate["trace"]["unexpected_global_slots"] == ["memory_threshold"]
+    assert payload["trace"]["top_candidates"][0]["structure_score"] > cpu_only_candidate["structure_score"]
 
 
 def test_match_device_cpu_memory_disk_over_list_template():
