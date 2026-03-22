@@ -2,11 +2,15 @@
   --bg: #eef2f0;
   --card: #fbfcf7;
   --line: #d0d7cf;
+  --line-strong: #bcc7bc;
   --text: #142018;
   --muted: #5f6d62;
   --accent: #1d6b4f;
   --accent-soft: #dcefe5;
+  --accent-ink: #0e3e2b;
   --danger: #9a2f2f;
+  --danger-soft: #fae6e6;
+  --success-soft: #e8f4ec;
   --shadow: 0 16px 40px rgba(18, 32, 24, 0.08);
 }
 
@@ -39,11 +43,20 @@ button {
   cursor: pointer;
 }
 
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 button.secondary,
 .file-button {
   background: white;
   color: var(--text);
   border: 1px solid var(--line);
+}
+
+button.compact {
+  padding: 7px 12px;
 }
 
 button.danger {
@@ -52,7 +65,7 @@ button.danger {
 }
 
 .shell {
-  max-width: 1680px;
+  max-width: 1700px;
   margin: 0 auto;
   padding: 28px;
 }
@@ -75,7 +88,8 @@ button.danger {
 
 h1,
 h2,
-h3 {
+h3,
+p {
   margin: 0;
 }
 
@@ -94,7 +108,7 @@ h3 {
 
 .layout {
   display: grid;
-  grid-template-columns: 360px minmax(0, 1fr);
+  grid-template-columns: 350px minmax(0, 1fr);
   gap: 20px;
 }
 
@@ -111,6 +125,11 @@ h3 {
   padding: 20px;
 }
 
+.spotlight-panel {
+  border-color: color-mix(in srgb, var(--accent) 24%, var(--line));
+  box-shadow: 0 18px 44px rgba(29, 107, 79, 0.09);
+}
+
 .sidebar {
   display: flex;
   flex-direction: column;
@@ -119,7 +138,8 @@ h3 {
 }
 
 .sidebar-head,
-.section-head {
+.section-head,
+.subpanel-head {
   display: flex;
   justify-content: space-between;
   gap: 16px;
@@ -173,64 +193,79 @@ h3 {
 }
 
 .template-item p {
-  margin: 0;
   color: var(--muted);
   font-size: 0.9rem;
 }
 
-.generator-grid,
-.editor-grid {
+.debug-grid,
+.generator-hub {
   display: grid;
   grid-template-columns: 1.1fr 0.9fr;
   gap: 18px;
 }
 
-.tester-grid {
+.optimizer-panel {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
   gap: 14px;
-  align-items: end;
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
 }
 
-.grow {
-  min-width: 0;
-}
-
-.llm-settings {
-  margin-top: 14px;
+.optimizer-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
+  gap: 14px;
 }
 
-.editor-form {
+.subpanel {
   display: grid;
-  gap: 18px;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(247, 250, 245, 0.92));
 }
 
+.llm-settings,
 .field-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
 }
 
+.llm-settings {
+  margin-top: 14px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .full-span {
   grid-column: 1 / -1;
 }
 
-.json-box,
+.summary-panel,
 .result-panel,
 .generator-result,
 .raw-preview {
-  min-height: 140px;
+  min-height: 120px;
   border: 1px solid var(--line);
-  border-radius: 16px;
+  border-radius: 18px;
   background: #f7faf5;
   padding: 14px;
   overflow: auto;
   white-space: pre-wrap;
+}
+
+.result-panel,
+.generator-result,
+.raw-preview {
   font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
   font-size: 0.9rem;
+}
+
+.summary-panel {
+  display: grid;
+  gap: 10px;
 }
 
 .empty {
@@ -251,6 +286,16 @@ h3 {
   font-size: 0.84rem;
 }
 
+.pill.success {
+  background: var(--success-soft);
+  color: var(--accent-ink);
+}
+
+.pill.danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
 .toggle {
   display: inline-flex;
   align-items: center;
@@ -263,7 +308,7 @@ h3 {
 }
 
 .json-editor {
-  min-height: 180px;
+  min-height: 150px;
 }
 
 .hint-list {
@@ -283,13 +328,160 @@ h3 {
   font-weight: 700;
 }
 
-@media (max-width: 1100px) {
+.hint-strip {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: center;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: #f4f8f3;
+  border: 1px solid var(--line);
+}
+
+.details-block {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.55);
+  padding: 10px 14px 14px;
+}
+
+.details-block summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: var(--accent-ink);
+}
+
+.details-body {
+  margin-top: 14px;
+}
+
+.meta-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.table-panel {
+  padding: 0;
+}
+
+.table-wrap {
+  overflow: auto;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 860px;
+}
+
+.data-table th,
+.data-table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.data-table th {
+  position: sticky;
+  top: 0;
+  background: #edf4ef;
+  z-index: 1;
+}
+
+.query-cell {
+  min-width: 260px;
+}
+
+.row-pass {
+  background: rgba(232, 244, 236, 0.55);
+}
+
+.row-fail {
+  background: rgba(250, 230, 230, 0.6);
+}
+
+.batch-card-list {
+  display: grid;
+  gap: 12px;
+}
+
+.batch-card {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: #fbfdf9;
+}
+
+.batch-card-error {
+  background: color-mix(in srgb, var(--danger-soft) 42%, white);
+}
+
+.action-list {
+  display: grid;
+  gap: 10px;
+}
+
+.action-card {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.action-accepted {
+  background: rgba(232, 244, 236, 0.55);
+}
+
+.action-rejected {
+  background: rgba(250, 230, 230, 0.45);
+}
+
+.batch-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.modal {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(20, 32, 24, 0.36);
+  z-index: 10;
+}
+
+.modal.hidden {
+  display: none;
+}
+
+.modal-card {
+  width: min(1080px, 100%);
+  max-height: calc(100vh - 48px);
+  display: grid;
+  gap: 16px;
+  background: var(--card);
+  border-radius: 24px;
+  padding: 20px;
+  box-shadow: 0 22px 48px rgba(18, 32, 24, 0.18);
+}
+
+.modal-card .raw-preview {
+  min-height: 320px;
+  max-height: calc(100vh - 170px);
+}
+
+@media (max-width: 1200px) {
   .layout,
-  .generator-grid,
-  .editor-grid,
-  .field-grid,
-  .llm-settings,
-  .tester-grid,
   .topbar {
     grid-template-columns: 1fr;
     display: grid;
@@ -297,5 +489,17 @@ h3 {
 
   .sidebar {
     min-height: auto;
+  }
+}
+
+@media (max-width: 980px) {
+  .debug-grid,
+  .generator-hub,
+  .optimizer-grid,
+  .llm-settings,
+  .field-grid,
+  .hint-strip {
+    grid-template-columns: 1fr;
+    display: grid;
   }
 }

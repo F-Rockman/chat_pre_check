@@ -20,6 +20,11 @@ export const DEFAULT_LLM_SETTINGS = {
 
 export async function generateTemplateFromSentence({
   text,
+  answer = "",
+  currentMatch = null,
+  currentTemplate = null,
+  missingSlots = [],
+  optimizationMode = "mixed",
   currentConfig,
   apiKey,
   baseUrl = DEFAULT_BASE_URL,
@@ -52,7 +57,15 @@ export async function generateTemplateFromSentence({
       },
       {
         role: "user",
-        content: buildGenerationPrompt({ text, currentConfig })
+        content: buildGenerationPrompt({
+          text,
+          answer,
+          currentMatch,
+          currentTemplate,
+          missingSlots,
+          optimizationMode,
+          currentConfig
+        })
       }
     ]
   });
@@ -77,7 +90,15 @@ export async function generateTemplateFromSentence({
   };
 }
 
-export function buildGenerationPrompt({ text, currentConfig }) {
+export function buildGenerationPrompt({
+  text,
+  answer = "",
+  currentMatch = null,
+  currentTemplate = null,
+  missingSlots = [],
+  optimizationMode = "mixed",
+  currentConfig
+}) {
   const sampleTemplates = selectRelevantTemplateExamples(text, currentConfig, 6);
   const blockedTerms = currentConfig?.matcher?.blocked_terms || [];
   return `
@@ -111,6 +132,21 @@ ${JSON.stringify(sampleTemplates, null, 2)}
 
 目标句子：
 ${text}
+
+参考答案或人工说明（如果为空就忽略）：
+${answer || ""}
+
+当前系统对这句 query 的已有结果（如果为空就忽略）：
+${currentMatch ? JSON.stringify(currentMatch, null, 2) : ""}
+
+当前优先修复的模板（如果为空就忽略）：
+${currentTemplate ? JSON.stringify(currentTemplate, null, 2) : ""}
+
+当前缺失槽位（如果为空就忽略）：
+${JSON.stringify(Array.isArray(missingSlots) ? missingSlots : [], null, 2)}
+
+当前优化模式：
+${optimizationMode}
 
 输出 JSON，结构固定为：
 {
@@ -153,6 +189,11 @@ ${text}
 - design_rationale 必须可读、具体，方便人工二次调整
 - template_id 要尽量复用当前仓库已有的命名风格
 - 如果目标句子更像“已有模式的变体”，优先沿用已有 slot 命名，不要发明新名字
+- 如果提供了 answer，要把它当成意图解释和字段边界的辅助信息，但不要把 answer 文本原样塞进模板
+- 如果提供了当前已有结果，要优先思考“修已有模板更合理，还是新增模板更合理”
+- 如果优化模式是 slot_completion，优先保留当前模板的语义边界、template_id、query_operator 和大部分槽位命名；优先补 utterances、must_terms、slot_extractors、required_slots / optional_slots，目标是把 partial 推成 matched
+- 如果优化模式是 new_template，不要硬修一个明显不适配的旧模板；更倾向于新增一个边界更清晰的模板
+- 如果提供了 currentTemplate，除非明确需要拆出新模板，否则不要随意改掉它的模板语义
 `.trim();
 }
 

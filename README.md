@@ -119,6 +119,7 @@ python -m pytest -q
 ```bash
 npm install
 npm run studio
+npm run studio:test
 ```
 
 Windows 下也可以直接双击：
@@ -871,12 +872,67 @@ npm run studio:test
 它提供这几件事：
 
 - 导入现有 `templates.json`
-- 图形化编辑常用模板字段
+- 首页优先做批量测试、单条调试和仓库评测集回归
+- 支持导入 `txt / json / jsonl` 批量测试文件
+- 支持批量导入问句或问答文件，批量生成模板建议
+- 支持对一批问句或问答做“持续优化”，自动复测、识别失败样本、生成候选模板，并只接受能提升目标指标的改动
+- 图形化编辑常用模板字段，高级 JSON 折叠收纳
 - 用兼容 OpenAI 协议的大模型把一句真实 query 拆成模板建议
 - 返回“为什么这样设计”的说明，方便人工微调模板
-- 本地测试当前模板集合是否命中
+- 支持一键跑仓库内置评测集
+- 支持把模板原始 JSON 放到弹层查看，避免编辑区过长
 - 导出当前模板文件
 - 保存一份工作区快照，便于下次继续编辑
+
+推荐的本地调试顺序：
+
+1. 先在首页跑批量测试或仓库评测集，看哪些 query 没命中
+2. 用单条测试看前置改写、抽槽和 top candidates
+3. 再去模板编辑器微调模板
+4. 如果是新场景，再用单句或批量模板生成补模板骨架
+5. 如果已经有一批真实问句或问答，可以直接跑“持续优化”，让工作台按目标通过率自动迭代到达标或达到轮数上限
+
+批量导入当前支持这些格式：
+
+- 纯文本：一行一条 query
+- `json` 数组：每条记录支持 `text / query / question`
+- `jsonl`：每行一个对象
+- 结构化测试样例：额外支持 `expected_template_id / expected_status`
+- 当前仓库的 [evaluation_cases.json](D:/GitHub/chat_pre_check_blank/tests/fixtures/evaluation_cases.json) 也能直接导入
+
+批量模板生成和持续优化时，如果输入记录里有 `answer / response / output` 字段，工作台会把它当成意图解释和字段边界的辅助信息，一起喂给提示词。
+
+持续优化当前支持三种目标指标：
+
+- `pass_rate`：适合带 `expected_template_id / expected_status` 的回归集
+- `coverage_rate`：适合只有问句或问答、没有标准标签的覆盖率观察
+- `matched_rate`：适合你明确希望把 `partial` 也继续压成完整命中的场景
+
+持续优化当前支持三种策略：
+
+- `balanced`：默认模式，`partial` 更偏向修模板，`unmatched` 更偏向补模板
+- `slot_completion_first`：优先修已有模板的 `utterances / must_terms / slot_extractors / required_slots`
+- `new_template_first`：优先新增模板，适合你确认这批问句就是新意图时使用
+
+持续优化的执行方式是：
+
+1. 先跑当前配置在这批数据上的基线结果
+2. 每轮挑失败样本或未覆盖样本
+3. 调用模型生成“新增模板”或“替换现有模板”的候选
+4. 立刻复测整批数据
+5. 只接受能提升目标指标的改动
+6. 直到达标或达到轮数上限
+
+如果你当前最大的痛点是“已经命中了模板，但总是 `partial`”，推荐直接选：
+
+- `target_metric = matched_rate`
+- `optimization_strategy = slot_completion_first`
+
+工作台示例文件：
+
+- [batch_match_cases.jsonl](D:/GitHub/chat_pre_check_blank/template-studio/examples/batch_match_cases.jsonl)
+- [batch_generate_questions.jsonl](D:/GitHub/chat_pre_check_blank/template-studio/examples/batch_generate_questions.jsonl)
+- [optimization_qa_cases.jsonl](D:/GitHub/chat_pre_check_blank/template-studio/examples/optimization_qa_cases.jsonl)
 
 模板生成这条链路额外做了两层兼容：
 

@@ -1,0 +1,3 @@
+{"id":"match-1","text":"过去24小时接口错包告警Top15","expected_template_id":"alarm.interface.error.topn","expected_status":"matched"}
+{"id":"match-2","text":"查询最近cpu大于80的设备","expected_template_id":"device.cpu.over.list","expected_status":"partial"}
+{"id":"match-3","text":"帮我分析最近cpu异常原因","expected_status":"unmatched"}

@@ -12,11 +12,11 @@
         <div>
           <p class="eyebrow">Local Node.js Studio</p>
           <h1>Template Studio</h1>
-          <p class="subtitle">导入模板、用 LLM 生成模板、测试匹配、导出结果，全部在本地完成。</p>
+          <p class="subtitle">首页先做批量测试和单条调试，再决定要不要编辑模板，整个本地回归链路都能在这里闭环。</p>
         </div>
         <div class="workspace-actions">
           <label class="file-button">
-            导入 JSON
+            导入模板 JSON
             <input id="import-file" type="file" accept="application/json,.json" hidden />
           </label>
           <button id="save-workspace" class="secondary">保存工作区</button>
@@ -43,81 +43,235 @@
         </aside>
 
         <section class="main-column">
+          <section class="card spotlight-panel" id="debug-panel">
+            <div class="section-head">
+              <div>
+                <h2>本地调试台</h2>
+                <p class="muted">这里优先放测试链路：批量回归、单条调试、加载仓库评测集，先看效果再回头改模板。</p>
+              </div>
+              <div class="inline-actions">
+                <button id="run-evaluation-cases" class="secondary">一键跑仓库评测集</button>
+              </div>
+            </div>
+
+            <div class="debug-grid">
+              <section class="subpanel">
+                <div class="subpanel-head">
+                  <div>
+                    <h3>批量测试</h3>
+                    <p class="muted">支持 `txt / json / jsonl`，也支持当前仓库的 `evaluation_cases.json` 结构。</p>
+                  </div>
+                </div>
+                <label class="field">
+                  <span>批量输入</span>
+                  <textarea
+                    id="batch-match-input"
+                    rows="7"
+                    placeholder="一行一条 query，或粘贴 JSON / JSONL。JSON 里支持 text/query/question，也支持 expected_template_id / expected_status。"
+                  ></textarea>
+                </label>
+                <div class="inline-actions">
+                  <label class="file-button">
+                    导入批量文件
+                    <input id="batch-match-file" type="file" accept=".txt,.json,.jsonl,.ndjson" hidden />
+                  </label>
+                  <button id="parse-batch-match" class="secondary">加载输入框内容</button>
+                  <button id="clear-batch-match" class="secondary">清空</button>
+                </div>
+                <div id="batch-match-meta" class="muted"></div>
+                <div class="inline-actions">
+                  <label class="toggle">
+                    <input id="scope-current-template-batch" type="checkbox" />
+                    <span>只测当前模板</span>
+                  </label>
+                  <button id="run-batch-match">一键批量测试</button>
+                </div>
+              </section>
+
+              <section class="subpanel">
+                <div class="subpanel-head">
+                  <div>
+                    <h3>单条测试</h3>
+                    <p class="muted">适合看前置改写、抽槽和 top candidates，定位为什么没命中。</p>
+                  </div>
+                </div>
+                <label class="field">
+                  <span>测试 query</span>
+                  <textarea id="match-input" rows="4" placeholder="例如：近24小时接口错误包告警前十"></textarea>
+                </label>
+                <div class="inline-actions">
+                  <label class="toggle">
+                    <input id="scope-current-template" type="checkbox" />
+                    <span>只测当前模板</span>
+                  </label>
+                  <button id="run-match">运行单条测试</button>
+                </div>
+                <div id="match-result" class="result-panel empty">尚未执行单条匹配测试。</div>
+              </section>
+            </div>
+
+            <div id="batch-match-summary" class="summary-panel empty">尚未执行批量测试。</div>
+            <div id="batch-match-result" class="result-panel empty">批量测试结果会显示在这里。</div>
+
+            <section class="optimizer-panel">
+              <div class="subpanel-head">
+                <div>
+                  <h3>持续优化</h3>
+                  <p class="muted">给一批问句或问答后，工作台会自动复测、挑失败样本、生成优化候选，并只接受能提升目标指标的改动。</p>
+                </div>
+              </div>
+              <div class="optimizer-grid">
+                <label class="field">
+                  <span>优化数据源</span>
+                  <select id="optimize-source">
+                    <option value="batch-match">批量测试区</option>
+                    <option value="batch-generate">批量生成区</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>目标指标</span>
+                  <select id="optimize-target-metric">
+                    <option value="pass_rate">pass_rate</option>
+                    <option value="coverage_rate">coverage_rate</option>
+                    <option value="matched_rate">matched_rate</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>优化策略</span>
+                  <select id="optimize-strategy">
+                    <option value="balanced">balanced</option>
+                    <option value="slot_completion_first">slot_completion_first</option>
+                    <option value="new_template_first">new_template_first</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>目标值</span>
+                  <input id="optimize-target-value" type="number" min="0" max="1" step="0.01" value="0.9" />
+                </label>
+                <label class="field">
+                  <span>最大轮数</span>
+                  <input id="optimize-max-rounds" type="number" min="1" max="20" step="1" value="3" />
+                </label>
+                <label class="field">
+                  <span>每轮最多候选</span>
+                  <input id="optimize-max-candidates" type="number" min="1" max="20" step="1" value="5" />
+                </label>
+                <div class="field">
+                  <span>执行</span>
+                  <div class="inline-actions">
+                    <button id="run-optimization">开始持续优化</button>
+                    <button id="apply-optimized-config" class="secondary">应用最终配置</button>
+                  </div>
+                </div>
+              </div>
+              <div id="optimization-summary" class="summary-panel empty">尚未执行持续优化。</div>
+              <div id="optimization-result" class="result-panel empty">持续优化的轮次记录会显示在这里。</div>
+            </section>
+          </section>
+
           <section class="card" id="generator-panel">
             <div class="section-head">
               <div>
-                <h2>一句话生成模板</h2>
-                <p class="muted">输入一句真实问数 query，工作台会调用大模型拆解并生成模板建议，同时返回设计理由，方便你手动微调。</p>
+                <h2>模板生成</h2>
+                <p class="muted">支持单句生成，也支持从批量问句或问答文件中批量生成模板建议，并返回“为什么这样设计”。</p>
               </div>
             </div>
-            <div class="generator-grid">
-              <div>
+
+            <div class="llm-settings">
+              <label class="field">
+                <span>API Key</span>
+                <input id="llm-api-key" type="password" placeholder="sk-..." />
+              </label>
+              <label class="field">
+                <span>Base URL</span>
+                <input id="llm-base-url" type="text" />
+              </label>
+              <label class="field">
+                <span>Model</span>
+                <input id="llm-model" type="text" />
+              </label>
+            </div>
+            <label class="toggle debug-toggle">
+              <input id="llm-insecure-ssl" type="checkbox" />
+              <span>关闭 SSL 校验，仅内部调试使用</span>
+            </label>
+
+            <div class="generator-hub">
+              <section class="subpanel">
+                <div class="subpanel-head">
+                  <div>
+                    <h3>批量生成模板</h3>
+                    <p class="muted">批量导入真实问句，工作台会逐条生成模板建议，可按条加入，也可批量合并。</p>
+                  </div>
+                </div>
+                <label class="field">
+                  <span>批量生成输入</span>
+                  <textarea
+                    id="batch-generator-input"
+                    rows="7"
+                    placeholder="支持一行一条 query，或 JSON / JSONL。对象字段可用 text / query / question，answer 会保留在导入记录里。"
+                  ></textarea>
+                </label>
+                <div class="inline-actions">
+                  <label class="file-button">
+                    导入问句文件
+                    <input id="batch-generator-file" type="file" accept=".txt,.json,.jsonl,.ndjson" hidden />
+                  </label>
+                  <button id="parse-batch-generator" class="secondary">加载输入框内容</button>
+                  <button id="clear-batch-generator" class="secondary">清空</button>
+                  <button id="generate-template-batch">批量生成模板建议</button>
+                </div>
+                <div id="batch-generator-meta" class="muted"></div>
+              </section>
+
+              <section class="subpanel">
+                <div class="subpanel-head">
+                  <div>
+                    <h3>单句生成</h3>
+                    <p class="muted">适合快速试探模板边界，先拿一条典型 query 看模型怎么拆。</p>
+                  </div>
+                </div>
                 <label class="field">
                   <span>原始句子</span>
                   <textarea id="generator-input" rows="4" placeholder="例如：查询最近 cpu 大于 80 且内存大于 70 的设备列表"></textarea>
                 </label>
-                <div class="llm-settings">
-                  <label class="field">
-                    <span>API Key</span>
-                    <input id="llm-api-key" type="password" placeholder="sk-..." />
-                  </label>
-                  <label class="field">
-                    <span>Base URL</span>
-                    <input id="llm-base-url" type="text" />
-                  </label>
-                  <label class="field">
-                    <span>Model</span>
-                    <input id="llm-model" type="text" />
-                  </label>
-                </div>
-                <label class="toggle debug-toggle">
-                  <input id="llm-insecure-ssl" type="checkbox" />
-                  <span>关闭 SSL 校验，仅内部调试使用</span>
-                </label>
                 <div class="inline-actions">
                   <button id="generate-template">生成模板建议</button>
                 </div>
-              </div>
-              <div>
                 <div id="generator-result" class="generator-result empty">尚未生成模板建议。</div>
-              </div>
+              </section>
             </div>
+
+            <div id="batch-generator-summary" class="summary-panel empty">尚未执行批量模板生成。</div>
+            <div id="batch-generator-result" class="result-panel empty">批量生成结果会显示在这里。</div>
           </section>
 
           <section class="card" id="editor-panel">
             <div class="section-head">
               <div>
                 <h2>模板编辑器</h2>
-                <p class="muted">常用字段支持直接编辑，复杂结构保留 JSON 高级编辑入口。</p>
+                <p class="muted">这里只保留常用字段和高级 JSON 折叠区，原始模板详情需要时再弹出查看。</p>
+              </div>
+              <div class="inline-actions">
+                <button id="show-template-details" class="secondary">查看当前模板 JSON</button>
               </div>
             </div>
             <div id="editor-root"></div>
-          </section>
-
-          <section class="card" id="tester-panel">
-            <div class="section-head">
-              <div>
-                <h2>模板匹配测试</h2>
-                <p class="muted">输入一条 query，验证当前模板集合是否能稳定命中；也可以只测试当前模板。</p>
-              </div>
-            </div>
-            <div class="tester-grid">
-              <label class="field grow">
-                <span>测试 query</span>
-                <textarea id="match-input" rows="3" placeholder="例如：近24小时接口错误包告警前十"></textarea>
-              </label>
-              <label class="toggle">
-                <input id="scope-current-template" type="checkbox" />
-                <span>只测当前模板</span>
-              </label>
-              <button id="run-match">运行匹配测试</button>
-            </div>
-            <div id="match-result" class="result-panel empty">尚未执行匹配测试。</div>
           </section>
         </section>
       </main>
     </div>
 
+    <div id="inspector-modal" class="modal hidden">
+      <div class="modal-card">
+        <div class="section-head">
+          <h2 id="inspector-title">详情</h2>
+          <button id="close-inspector" class="secondary">关闭</button>
+        </div>
+        <pre id="inspector-content" class="raw-preview"></pre>
+      </div>
+    </div>
+
     <script type="module" src="/app.js"></script>
   </body>
-  </html>
+</html>

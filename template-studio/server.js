@@ -5,8 +5,10 @@ import { fileURLToPath } from "node:url";
 
 import express from "express";
 
+import { batchGenerateTemplates, evaluateBatchMatch, parseBatchSource, summarizeBatchMatches } from "./lib/batch.js";
 import { generateTemplateFromSentence, DEFAULT_LLM_SETTINGS } from "./lib/llm.js";
 import { TemplateMatcher } from "./lib/matcher.js";
+import { optimizeConfigIteratively } from "./lib/optimizer.js";
 import { normalizeConfig } from "./lib/utils.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -15,6 +17,7 @@ const ROOT = path.resolve(__dirname, "..");
 const PUBLIC_DIR = path.join(__dirname, "public");
 const WORKSPACE_FILE = path.join(__dirname, "workspace", "current-config.json");
 const DEFAULT_CONFIG_FILE = path.join(ROOT, "configs", "templates.json");
+const DEFAULT_BATCH_CASES_FILE = path.join(ROOT, "tests", "fixtures", "evaluation_cases.json");
 const PORT = Number(process.env.TEMPLATE_STUDIO_PORT || 3847);
 const DEFAULT_INSECURE_SSL = ["1", "true", "yes", "on"].includes(
   String(process.env.TEMPLATE_STUDIO_INSECURE_SSL || process.env.OPENAI_INSECURE_SSL || "").toLowerCase()
@@ -66,6 +69,77 @@ app.post("/api/match", async (req, res) => {
   res.json({ ok: true, result });
 });
 
+app.post("/api/batch/parse", async (req, res) => {
+  try {
+    const content = String(req.body?.content || "");
+    const filename = String(req.body?.filename || "");
+    const parsed = parseBatchSource(content, filename);
+    res.json({ ok: true, ...parsed });
+  } catch (error) {
+    res.status(400).json({
+      ok: false,
+      error: error instanceof Error ? error.message : "Batch parsing failed."
+    });
+  }
+});
+
+app.get("/api/examples/evaluation-cases", async (_req, res) => {
+  try {
+    const content = await fs.readFile(DEFAULT_BATCH_CASES_FILE, "utf8");
+    const parsed = parseBatchSource(content, path.basename(DEFAULT_BATCH_CASES_FILE));
+    res.json({
+      ok: true,
+      source_name: DEFAULT_BATCH_CASES_FILE,
+      ...parsed
+    });
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : "Failed to load evaluation cases."
+    });
+  }
+});
+
+app.post("/api/match/batch", async (req, res) => {
+  try {
+    const items = Array.isArray(req.body?.items) ? req.body.items : [];
+    if (!items.length) {
+      res.status(400).json({ ok: false, error: "Missing batch items." });
+      return;
+    }
+    const config = normalizeConfig(req.body?.config || (await loadWorkspaceConfig()).config);
+    const templateIds = Array.isArray(req.body?.templateIds) ? req.body.templateIds.map(String) : null;
+    const matcher = new TemplateMatcher(config, { baseDir: ROOT });
+    const results = items.map((item) => {
+      const normalizedItem = {
+        id: String(item?.id || ""),
+        text: String(item?.text || "").trim(),
+        expected_template_id: String(item?.expected_template_id || ""),
+        expected_status: String(item?.expected_status || ""),
+        expected_not_full_match: Boolean(item?.expected_not_full_match),
+        answer: String(item?.answer || ""),
+        metadata: item?.metadata && typeof item.metadata === "object" ? item.metadata : {}
+      };
+      const result = matcher.match(normalizedItem.text, { templateIds });
+      return {
+        item: normalizedItem,
+        result,
+        evaluation: evaluateBatchMatch(normalizedItem, result)
+      };
+    });
+    res.json({
+      ok: true,
+      results,
+      summary: summarizeBatchMatches(results)
+    });
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : "Batch match failed."
+    });
+  }
+});
+
 app.post("/api/llm/generate-template", async (req, res) => {
   try {
     const text = String(req.body?.text || "").trim();
@@ -87,6 +161,94 @@ app.post("/api/llm/generate-template", async (req, res) => {
     res.status(500).json({
       ok: false,
       error: error instanceof Error ? error.message : "Unknown LLM generation error."
+    });
+  }
+});
+
+app.post("/api/llm/generate-template/batch", async (req, res) => {
+  try {
+    const items = Array.isArray(req.body?.items) ? req.body.items : [];
+    if (!items.length) {
+      res.status(400).json({ ok: false, error: "Missing batch items." });
+      return;
+    }
+    const settings = req.body?.settings || {};
+    const config = normalizeConfig(req.body?.config || {});
+    const output = await batchGenerateTemplates(items, async (item) =>
+      generateTemplateFromSentence({
+        text: String(item?.text || "").trim(),
+        answer: String(item?.answer || "").trim(),
+        currentConfig: config,
+        apiKey: settings.apiKey || process.env.DASHSCOPE_API_KEY || "",
+        baseUrl: settings.baseUrl || process.env.DASHSCOPE_BASE_URL || DEFAULT_LLM_SETTINGS.baseUrl,
+        model: settings.model || process.env.DASHSCOPE_MODEL || DEFAULT_LLM_SETTINGS.model,
+        insecureSSL: Boolean(settings.insecureSSL ?? DEFAULT_INSECURE_SSL)
+      })
+    );
+    res.json({ ok: true, ...output });
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : "Unknown batch LLM generation error."
+    });
+  }
+});
+
+app.post("/api/optimize/run", async (req, res) => {
+  try {
+    const items = Array.isArray(req.body?.items) ? req.body.items : [];
+    if (!items.length) {
+      res.status(400).json({ ok: false, error: "Missing optimization items." });
+      return;
+    }
+    const settings = req.body?.settings || {};
+    const config = normalizeConfig(req.body?.config || (await loadWorkspaceConfig()).config);
+    const targetMetric = String(req.body?.targetMetric || "pass_rate");
+    const targetValue = Number(req.body?.targetValue ?? 0.9);
+    const maxRounds = Math.max(1, Number(req.body?.maxRounds ?? 3));
+    const maxCandidatesPerRound = Math.max(1, Number(req.body?.maxCandidatesPerRound ?? 5));
+    const optimizationStrategy = String(req.body?.optimizationStrategy || "balanced");
+
+    const output = await optimizeConfigIteratively({
+      items,
+      config,
+      baseDir: ROOT,
+      targetMetric,
+      targetValue,
+      maxRounds,
+      maxCandidatesPerRound,
+      optimizationStrategy,
+      generateCandidate: async ({
+        item,
+        currentConfig,
+        currentResult,
+        currentEvaluation,
+        currentTemplate,
+        generationMode,
+        missingSlots
+      }) =>
+        generateTemplateFromSentence({
+          text: String(item?.text || "").trim(),
+          answer: String(item?.answer || "").trim(),
+          currentMatch: {
+            result: currentResult,
+            evaluation: currentEvaluation
+          },
+          currentTemplate,
+          missingSlots,
+          optimizationMode: generationMode,
+          currentConfig,
+          apiKey: settings.apiKey || process.env.DASHSCOPE_API_KEY || "",
+          baseUrl: settings.baseUrl || process.env.DASHSCOPE_BASE_URL || DEFAULT_LLM_SETTINGS.baseUrl,
+          model: settings.model || process.env.DASHSCOPE_MODEL || DEFAULT_LLM_SETTINGS.model,
+          insecureSSL: Boolean(settings.insecureSSL ?? DEFAULT_INSECURE_SSL)
+        })
+    });
+    res.json({ ok: true, ...output });
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : "Optimization run failed."
     });
   }
 });

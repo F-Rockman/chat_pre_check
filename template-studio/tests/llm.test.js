@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { generateTemplateFromSentence, parseModelJsonObject } from "../lib/llm.js";
+import { buildGenerationPrompt, generateTemplateFromSentence, parseModelJsonObject } from "../lib/llm.js";
 
 test("parseModelJsonObject strips think tags and parses JSON blocks", () => {
   const payload = parseModelJsonObject(`
@@ -118,4 +118,33 @@ test("generateTemplateFromSentence accepts OpenAI-compatible content with think 
   assert.equal(result.template.template_id, "network.device.resource.aggregate.by_selector");
   assert.equal(result.analysis.query_operator, "aggregate");
   assert.equal(result.analysis.design_rationale[0], "趋势和聚合值的结果形态不同，因此先拆模板边界。");
+});
+
+test("buildGenerationPrompt includes slot completion guidance when current template context is provided", () => {
+  const prompt = buildGenerationPrompt({
+    text: "查询最近cpu大于80的设备",
+    answer: "返回 CPU 超阈值设备列表",
+    currentMatch: {
+      result: {
+        template_id: "device.cpu.over.list",
+        status: "partial",
+        missing_slots: ["query_operator"]
+      }
+    },
+    currentTemplate: {
+      template_id: "device.cpu.over.list",
+      query_mode: "metric_query",
+      required_slots: ["query_operator", "cpu_threshold"]
+    },
+    missingSlots: ["query_operator"],
+    optimizationMode: "slot_completion",
+    currentConfig: {
+      templates: []
+    }
+  });
+
+  assert.match(prompt, /当前优先修复的模板/);
+  assert.match(prompt, /当前缺失槽位/);
+  assert.match(prompt, /slot_completion/);
+  assert.match(prompt, /把 partial 推成 matched/);
 });
