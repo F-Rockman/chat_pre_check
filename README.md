@@ -2,7 +2,9 @@
 
 面向“问数”场景的通用模板匹配能力。
 
-这个工程的定位不是 POC，也不是业务 demo。它是一个纯中间层能力，负责在注册一批问数模板后，快速判断用户 query 是否命中某个模板。
+这是一个面向问数场景的模板匹配与槽位提取系统。
+
+它会根据已配置的模板，对输入 query 进行标准化、候选召回、参数抽取、结构校验和结果判定，最终输出模板是否命中，以及关键参数是否齐全。
 
 返回结果只有三类：
 
@@ -75,19 +77,39 @@
 - 拿不准时会保守返回，不会强行乱猜
 - 能力会持续通过回归测试校验
 
+## 近期增强
+
+最近一轮核心能力增强主要包括：
+
+- 前置 `query_rewrite` 改写
+  支持行业黑话、简称、别名在匹配前统一改写
+- 启动期配置校验和 `lint`
+  坏模板、坏正则、坏配置会在启动前直接拦住
+- 全局高信号槽位和更强的结构判断
+  复杂 query 会优先匹配结构更完整的模板
+- 组合约束升级
+  支持 `required_one_of / conditional_required / mutually_exclusive_slots`
+- 二阶段 `reranker`
+  可以在初排候选之上继续细排
+- 结构化 fallback
+  LLM 兜底优先走 `json_schema`，不支持时自动回退到 `json_object`
+- 更强的诊断 trace
+  可以看到 `global_slots / unexpected_global_slots / requirement_issues / structure_details / rerank_trace`
+
 ## 核心设计
 
 整体链路：
 
 1. `normalize_text`：文本标准化
 2. 可选 `query_rewrite`：前置行业黑话、别名、内部简称改写
-3. 文本召回候选模板，不做全局统一提参
+3. 共享 `slot_extractors` 与 `global_slots`：补充高信号公共参数
 4. `BM25F` + `char ngram` + `vector search`：多路候选召回
-5. 命中候选后，按模板自己的 `slot_extractors` 做模板内提参
-6. `RRF` + 动态权重重排：融合多路召回，按 query 复杂度调权
-7. `slot_fit` + `constraint` + `structure_score`：模板约束和结构校验
-8. 可选模板级 LLM 补参：只在已命中模板上窄触发
-9. 阈值和歧义判断：输出 `matched / partial / unmatched`
+5. `RRF` + 动态权重初排：融合多路召回，按 query 复杂度调权
+6. 可选 `reranker`：对 top-k 候选继续细排
+7. 命中候选后，按模板自己的 `slot_extractors` 做模板内提参
+8. `slot_fit` + `constraint` + `structure_score`：模板约束和结构校验
+9. 可选 LLM fallback：支持模板选择裁决和模板级补参
+10. 阈值和歧义判断：输出 `matched / partial / unmatched`
 
 设计原则：
 
@@ -110,17 +132,29 @@
 |   |-- engine.py
 |   |-- evaluation.py
 |   |-- extractors.py
+|   |-- fallback.py
 |   |-- models.py
+|   |-- openai_client.py
+|   |-- rerankers.py
+|   |-- rewrite.py
 |   |-- scoring.py
+|   |-- structured_output.py
+|   |-- text_matching.py
+|   |-- validation.py
 |   `-- vector_index.py
 |-- tests/
 |   |-- fixtures/evaluation_cases.json
+|   |-- test_config_validation.py
 |   |-- test_engine.py
-|   |-- test_extractors.py
-|   |-- test_generalization.py
+|   |-- test_engine_capabilities.py
+|   |-- test_engine_core_enhancements.py
 |   |-- test_evaluation_corpus.py
 |   |-- test_evaluation_report.py
-|   `-- test_engine_capabilities.py
+|   |-- test_openai_sdk_integration.py
+|   |-- test_rerankers.py
+|   |-- test_structured_fallback.py
+|   |-- test_template_constraints.py
+|   `-- test_term_match_modes.py
 |-- tools/
 |   |-- evaluate_matcher.py
 |   |-- lint_templates.py
