@@ -44,6 +44,16 @@ SLOT_EXTRACTION_SYSTEM_PROMPT = """你是专业的问数场景参数提取引擎
 - LLM 只需补充 missing_slots 中列出的槽位
 - 内置提取器的具体能力见 builtin_extractors 字段，理解其 output_format 以正确填充
 
+## 内置提取器输出要求（关键）
+当使用 builtin 提取时，必须将用户表达转换为结构化格式，**不能直接返回原始文本**：
+
+- 用户说"近24小时" → 输出 {"mode": "relative", "duration": {"value": 24, "unit": "hour"}, "direction": "past"}
+- 用户说"最近3天" → 输出 {"mode": "relative", "duration": {"value": 3, "unit": "day"}, "direction": "past"}
+- 用户说"昨晚八点" → 输出 {"mode": "absolute", "start_time": 时间戳, "end_time": 时间戳}（根据当前系统时间计算）
+- 用户说"2024-01-01到2024-01-15" → 输出 {"mode": "absolute", "start_time": 1704067200, "end_time": 1705276800}
+
+**必须根据当前系统时间计算具体的时间戳值，不能返回"昨晚八点"这样的原始文本。**
+
 ## 提取来源判断规则
 当一个槽位同时存在 builtin_extractors 和 slot_hints 时，按以下规则判断 extraction_source：
 
@@ -60,7 +70,7 @@ SLOT_EXTRACTION_SYSTEM_PROMPT = """你是专业的问数场景参数提取引擎
    - 用户说"top 20" → 匹配 regex 规则提取数值 20 → extraction_source = "custom"
 
 ## 输出格式要求
-- **内置规则提取的槽位（builtin）**：按 builtin_extractors 中描述的 output_format 输出结构化对象
+- **内置规则提取的槽位（builtin）**：按 builtin_extractors 中描述的 output_format 输出结构化对象，必须转换原始表达
 - **用户规则提取的槽位（custom）**：按 slot_hints 中定义的值格式输出（简单值或对象）
 
 ## 禁止行为
@@ -68,16 +78,11 @@ SLOT_EXTRACTION_SYSTEM_PROMPT = """你是专业的问数场景参数提取引擎
 - 不要猜测超出 slot_constraints 的值
 - 不要用低置信度值填充必填槽位
 - 不要返回非 JSON 格式内容
+- **不要直接返回原始文本表达（如"昨晚八点"），必须转换为结构化格式**
 
 ## 输出契约
-返回严格 JSON：
-{
-  "slots": {"槽位名": 值},
-  "missing_slots": ["缺失槽位"],
-  "extraction_source": {"槽位名": "builtin|custom"},
-  "confidence": {"槽位名": "high|medium|low"},
-  "extraction_notes": ["说明"]
-}"""
+返回一行紧凑 JSON，不要换行或格式化：
+{"slots":{"槽位名":值},"missing_slots":["缺失槽位"],"extraction_source":{"槽位名":"builtin|custom"},"confidence":{"槽位名":"high|medium|low"},"extraction_notes":["说明"]}"""
 
 
 SLOT_EXTRACTION_SCHEMA: dict[str, Any] = {
