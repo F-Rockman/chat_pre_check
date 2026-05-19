@@ -29,14 +29,29 @@ SLOT_EXTRACTION_SYSTEM_PROMPT = """你是专业的问数场景参数提取引擎
 
 ## 提取规则
 1. **严格遵循模板定义**：只提取 target_slots 中列出的槽位，绝不猜测未定义参数
-2. **优先使用 slot_hints**：
-   - keyword_value 类型：用户说"近24小时" → 映射到预设值 {"mode": "relative", "preset": "last_24h"}
-   - regex 类型：按正则模式提取，注意 value_type、min、max 约束
+2. **优先使用提取器提示**：
+   - **用户自定义提取器（slot_hints）**：keyword_value 类型提供关键词映射，regex 类型提供正则规则
+   - **内置提取器（builtin_extractors）**：系统内置的提取能力，理解其 output_format 以正确填充
 3. **置信度评估**：
-   - high：用户明确提及，且匹配 slot_hints 规则
+   - high：用户明确提及，且匹配提取器规则
    - medium：用户提及但需推断
    - low：用户未提及，但模板有默认值可填充
 4. **缺失处理**：必填槽位未提取时，必须列入 missing_slots
+
+## 内置提取器说明
+- 内置提取器在 LLM 调用前由规则引擎执行
+- 已提取的槽位在 current_slots 中可见
+- LLM 只需补充 missing_slots 中列出的槽位
+- 内置提取器的具体能力见 builtin_extractors 字段，理解其 output_format 以正确填充
+
+## 提取来源标识
+- **builtin**：使用内置提取器规则提取（如 time_range）
+- **custom**：使用用户自定义规则提取（如 keyword_value、regex）
+- 必须在 extraction_source 中标识每个槽位的来源
+
+## 输出格式要求
+- **内置规则提取的槽位**：按 builtin_extractors 中描述的 output_format 输出
+- **用户规则提取的槽位**：按 slot_hints 中定义的值格式输出（简单值或对象）
 
 ## 禁止行为
 - 不要发明模板未定义的槽位
@@ -45,21 +60,46 @@ SLOT_EXTRACTION_SYSTEM_PROMPT = """你是专业的问数场景参数提取引擎
 - 不要返回非 JSON 格式内容
 
 ## 输出契约
-返回严格 JSON：{"slots": {...}, "missing_slots": [...], "confidence": {...}, "extraction_notes": [...]}"""
+返回严格 JSON：
+{
+  "slots": {"槽位名": 值},
+  "missing_slots": ["缺失槽位"],
+  "extraction_source": {"槽位名": "builtin|custom"},
+  "confidence": {"槽位名": "high|medium|low"},
+  "extraction_notes": ["说明"]
+}"""
 
 
 SLOT_EXTRACTION_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["slots", "missing_slots"],
+    "required": ["slots", "missing_slots", "extraction_source"],
     "properties": {
-        "slots": {"type": "object", "additionalProperties": True},
-        "missing_slots": {"type": "array", "items": {"type": "string"}},
+        "slots": {
+            "type": "object",
+            "additionalProperties": True,
+            "description": "提取成功的槽位参数",
+        },
+        "missing_slots": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "仍缺失的必填槽位列表",
+        },
+        "extraction_source": {
+            "type": "object",
+            "additionalProperties": {"type": "string", "enum": ["builtin", "custom"]},
+            "description": "每个槽位的提取来源：builtin=内置规则，custom=用户自定义规则",
+        },
         "confidence": {
             "type": "object",
             "additionalProperties": {"type": "string", "enum": ["high", "medium", "low"]},
+            "description": "每个槽位的提取置信度",
         },
-        "extraction_notes": {"type": "array", "items": {"type": "string"}},
+        "extraction_notes": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "提取过程中的关键判断说明",
+        },
     },
 }
 
@@ -553,6 +593,8 @@ def build_optimized_slot_extraction_prompt(
     missing_slots: list[str],
     target_slots: list[str],
     slot_hints: dict[str, Any],
+    builtin_extractors: dict[str, Any],
+    current_time: dict[str, Any],
 ) -> str:
     """构建优化后的 User Prompt（动态任务数据）。"""
     constraints_table = f"""
@@ -563,6 +605,13 @@ def build_optimized_slot_extraction_prompt(
 - 互斥槽位：{[g.to_dict() for g in template.mutually_exclusive_slots]}
 - 值域约束：{template.slot_constraints}"""
 
+    current_time_table = f"""
+| 字段 | 值 |
+|------|-----|
+| timestamp | {current_time.get('timestamp')} |
+| datetime | {current_time.get('datetime')} |
+| timezone | {current_time.get('timezone', 'UTC+8')} |"""
+
     return f"""# 任务上下文
 
 ## 模板信息
@@ -572,11 +621,17 @@ def build_optimized_slot_extraction_prompt(
 | description | {template.description} |
 | query_mode | {template.query_mode} |
 
+## 当前系统时间
+{current_time_table}
+
 ## 槽位约束
 {constraints_table}
 
-## 槽位提取提示（slot_hints）
+## 用户自定义提取器（slot_hints）
 {json.dumps(slot_hints, ensure_ascii=False, indent=2)}
+
+## 内置提取器（builtin_extractors）
+{json.dumps(builtin_extractors, ensure_ascii=False, indent=2)}
 
 ## 已提取槽位（规则引擎产出）
 {json.dumps(current_slots, ensure_ascii=False, indent=2)}
@@ -602,8 +657,14 @@ def build_optimized_slot_extraction_prompt(
 
 注意：
 1. 已提取槽位（current_slots）由规则引擎产出，优先信任，LLM 只补充缺失部分
-2. 只处理 target_slots 中列出的槽位
-3. 返回严格 JSON，不要添加任何解释性文本"""
+2. 内置提取器（builtin_extractors）描述了系统内置的提取能力，理解其 output_format
+3. 用户自定义提取器（slot_hints）提供了关键词映射和正则规则
+4. 当前系统时间用于计算绝对时间范围（如"上周一到上周五"、"最近3天"的起止时间）
+5. 提取来源标识：
+   - 使用内置规则提取 → extraction_source 标记为 "builtin"，按 output_format 输出
+   - 使用用户规则提取 → extraction_source 标记为 "custom"，按原值输出
+6. 只处理 target_slots 中列出的槽位
+7. 返回严格 JSON，不要添加任何解释性文本"""
 
 
 def call_llm_for_optimized_slot_extraction(
@@ -616,6 +677,8 @@ def call_llm_for_optimized_slot_extraction(
     missing_slots: list[str],
     target_slots: list[str],
     slot_hints: dict[str, Any],
+    builtin_extractors: dict[str, Any],
+    current_time: dict[str, Any],
 ) -> dict[str, Any] | None:
     """调用 LLM 进行槽位提取（使用优化后的结构化 Prompt）。"""
     user_prompt = build_optimized_slot_extraction_prompt(
@@ -626,6 +689,8 @@ def call_llm_for_optimized_slot_extraction(
         missing_slots=missing_slots,
         target_slots=target_slots,
         slot_hints=slot_hints,
+        builtin_extractors=builtin_extractors,
+        current_time=current_time,
     )
     try:
         response = client.chat.completions.create(
