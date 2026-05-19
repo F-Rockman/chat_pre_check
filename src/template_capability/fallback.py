@@ -44,14 +44,24 @@ SLOT_EXTRACTION_SYSTEM_PROMPT = """你是专业的问数场景参数提取引擎
 - LLM 只需补充 missing_slots 中列出的槽位
 - 内置提取器的具体能力见 builtin_extractors 字段，理解其 output_format 以正确填充
 
-## 提取来源标识
-- **builtin**：使用内置提取器规则提取（如 time_range）
-- **custom**：使用用户自定义规则提取（如 keyword_value、regex）
-- 必须在 extraction_source 中标识每个槽位的来源
+## 提取来源判断规则
+当一个槽位同时存在 builtin_extractors 和 slot_hints 时，按以下规则判断 extraction_source：
+
+1. **优先检查 slot_hints（用户自定义规则）**：
+   - 如果值匹配 keyword_value 的某个 case（用户表达 → 预定义值映射）→ extraction_source = "custom"
+   - 如果值匹配 regex 的某个 pattern（正则提取）→ extraction_source = "custom"
+
+2. **其次检查 builtin_extractors（内置规则）**：
+   - 如果值符合 builtin_extractors 的 output_format 结构 → extraction_source = "builtin"
+
+3. **判断示例**：
+   - 用户说"华东" → 匹配 keyword_value 规则 {"terms": ["华东"], "value": "east_cn"} → extraction_source = "custom"
+   - 用户说"近7天" → 符合 time_range 的 relative 格式 {"mode": "relative", "duration": {...}} → extraction_source = "builtin"
+   - 用户说"top 20" → 匹配 regex 规则提取数值 20 → extraction_source = "custom"
 
 ## 输出格式要求
-- **内置规则提取的槽位**：按 builtin_extractors 中描述的 output_format 输出
-- **用户规则提取的槽位**：按 slot_hints 中定义的值格式输出（简单值或对象）
+- **内置规则提取的槽位（builtin）**：按 builtin_extractors 中描述的 output_format 输出结构化对象
+- **用户规则提取的槽位（custom）**：按 slot_hints 中定义的值格式输出（简单值或对象）
 
 ## 禁止行为
 - 不要发明模板未定义的槽位
