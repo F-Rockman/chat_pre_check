@@ -19,6 +19,51 @@ from template_capability.structured_output import (
 )
 
 
+# ============================================================================
+# 优化后的槽位提取 Prompt（System Prompt 固定，可缓存）
+# ============================================================================
+
+SLOT_EXTRACTION_SYSTEM_PROMPT = """你是专业的问数场景参数提取引擎。你的唯一职责是从用户查询中提取结构化槽位参数。
+
+# 核心原则
+
+## 提取规则
+1. **严格遵循模板定义**：只提取 target_slots 中列出的槽位，绝不猜测未定义参数
+2. **优先使用 slot_hints**：
+   - keyword_value 类型：用户说"近24小时" → 映射到预设值 {"mode": "relative", "preset": "last_24h"}
+   - regex 类型：按正则模式提取，注意 value_type、min、max 约束
+3. **置信度评估**：
+   - high：用户明确提及，且匹配 slot_hints 规则
+   - medium：用户提及但需推断
+   - low：用户未提及，但模板有默认值可填充
+4. **缺失处理**：必填槽位未提取时，必须列入 missing_slots
+
+## 禁止行为
+- 不要发明模板未定义的槽位
+- 不要猜测超出 slot_constraints 的值
+- 不要用低置信度值填充必填槽位
+- 不要返回非 JSON 格式内容
+
+## 输出契约
+返回严格 JSON：{"slots": {...}, "missing_slots": [...], "confidence": {...}, "extraction_notes": [...]}"""
+
+
+SLOT_EXTRACTION_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["slots", "missing_slots"],
+    "properties": {
+        "slots": {"type": "object", "additionalProperties": True},
+        "missing_slots": {"type": "array", "items": {"type": "string"}},
+        "confidence": {
+            "type": "object",
+            "additionalProperties": {"type": "string", "enum": ["high", "medium", "low"]},
+        },
+        "extraction_notes": {"type": "array", "items": {"type": "string"}},
+    },
+}
+
+
 @dataclass(slots=True)
 class FallbackSuggestion:
     """模板选择 fallback 的统一返回结构。"""
@@ -493,3 +538,113 @@ def _coerce_score(raw_value: Any, *, default: float) -> float:
     except (TypeError, ValueError):
         return default
     return max(0.0, min(1.0, value))
+
+
+# ============================================================================
+# 优化后的槽位提取函数（使用结构化 Prompt）
+# ============================================================================
+
+
+def build_optimized_slot_extraction_prompt(
+    template: TemplateDefinition,
+    input_text: str,
+    normalized_text: str,
+    current_slots: dict[str, Any],
+    missing_slots: list[str],
+    target_slots: list[str],
+    slot_hints: dict[str, Any],
+) -> str:
+    """构建优化后的 User Prompt（动态任务数据）。"""
+    constraints_table = f"""
+- 必填槽位：{template.required_slots}
+- 可选槽位：{template.optional_slots}
+- 至少满足其一：{[g.to_dict() for g in template.required_one_of]}
+- 条件必填：{[r.to_dict() for r in template.conditional_required]}
+- 互斥槽位：{[g.to_dict() for g in template.mutually_exclusive_slots]}
+- 值域约束：{template.slot_constraints}"""
+
+    return f"""# 任务上下文
+
+## 模板信息
+| 字段 | 值 |
+|------|-----|
+| template_id | {template.template_id} |
+| description | {template.description} |
+| query_mode | {template.query_mode} |
+
+## 槽位约束
+{constraints_table}
+
+## 槽位提取提示（slot_hints）
+{json.dumps(slot_hints, ensure_ascii=False, indent=2)}
+
+## 已提取槽位（规则引擎产出）
+{json.dumps(current_slots, ensure_ascii=False, indent=2)}
+
+## 待补充槽位
+{missing_slots}
+
+---
+
+# 用户输入
+
+## 原始文本
+{input_text}
+
+## 标准化文本
+{normalized_text}
+
+---
+
+# 提取任务
+
+请基于上述模板定义和用户输入，提取 {target_slots} 中的槽位参数。
+
+注意：
+1. 已提取槽位（current_slots）由规则引擎产出，优先信任，LLM 只补充缺失部分
+2. 只处理 target_slots 中列出的槽位
+3. 返回严格 JSON，不要添加任何解释性文本"""
+
+
+def call_llm_for_optimized_slot_extraction(
+    client: Any,
+    model: str,
+    template: TemplateDefinition,
+    input_text: str,
+    normalized_text: str,
+    current_slots: dict[str, Any],
+    missing_slots: list[str],
+    target_slots: list[str],
+    slot_hints: dict[str, Any],
+) -> dict[str, Any] | None:
+    """调用 LLM 进行槽位提取（使用优化后的结构化 Prompt）。"""
+    user_prompt = build_optimized_slot_extraction_prompt(
+        template=template,
+        input_text=input_text,
+        normalized_text=normalized_text,
+        current_slots=current_slots,
+        missing_slots=missing_slots,
+        target_slots=target_slots,
+        slot_hints=slot_hints,
+    )
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            temperature=0,
+            messages=[
+                {"role": "system", "content": SLOT_EXTRACTION_SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
+            response_format={
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "slot_extraction",
+                    "strict": True,
+                    "schema": SLOT_EXTRACTION_SCHEMA,
+                },
+            },
+        )
+        content = extract_chat_completion_content(response)
+        return parse_json_content(content)
+    except Exception:
+        return None
