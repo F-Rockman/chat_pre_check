@@ -55,19 +55,24 @@ SLOT_EXTRACTION_SYSTEM_PROMPT = """你是专业的问数场景参数提取引擎
 **必须根据当前系统时间计算具体的时间戳值，不能返回"昨晚八点"这样的原始文本。**
 
 ## 提取来源判断规则
-当一个槽位同时存在 builtin_extractors 和 slot_hints 时，按以下规则判断 extraction_source：
+当一个槽位同时存在 builtin_extractors 和 slot_hints 时，按以下规则判断：
 
 1. **优先检查 slot_hints（用户自定义规则）**：
-   - 如果值匹配 keyword_value 的某个 case（用户表达 → 预定义值映射）→ extraction_source = "custom"
-   - 如果值匹配 regex 的某个 pattern（正则提取）→ extraction_source = "custom"
+   - 如果值匹配 keyword_value 的某个 case（用户表达 → 预定义值映射）→ 使用 custom 规则
+   - 如果值匹配 regex 的某个 pattern（正则提取）→ 使用 custom 规则
 
 2. **其次检查 builtin_extractors（内置规则）**：
-   - 如果值符合 builtin_extractors 的 output_format 结构 → extraction_source = "builtin"
+   - 如果值符合 builtin_extractors 的 output_format 结构 → 使用 builtin 规则
 
 3. **判断示例**：
-   - 用户说"华东" → 匹配 keyword_value 规则 {"terms": ["华东"], "value": "east_cn"} → extraction_source = "custom"
-   - 用户说"近7天" → 符合 time_range 的 relative 格式 {"mode": "relative", "duration": {...}} → extraction_source = "builtin"
-   - 用户说"top 20" → 匹配 regex 规则提取数值 20 → extraction_source = "custom"
+   - 用户说"华东" → 匹配 keyword_value 规则 → 使用 custom 规则
+   - 用户说"近7天" → 符合 time_range 的 relative 格式 → 使用 builtin 规则
+   - 用户说"top 20" → 匹配 regex 规则 → 使用 custom 规则
+
+## extraction_source 输出规则
+- **只输出 builtin 类型的槽位**：extraction_source 仅记录使用内置提取器的槽位
+- **custom 类型不输出**：使用用户自定义规则的槽位不需要在 extraction_source 中出现
+- 示例：如果 time_range 使用 builtin，topn 使用 custom，则 extraction_source = {"time_range": "builtin"}
 
 ## 输出格式要求
 - **内置规则提取的槽位（builtin）**：按 builtin_extractors 中描述的 output_format 输出结构化对象，必须转换原始表达
@@ -82,13 +87,15 @@ SLOT_EXTRACTION_SYSTEM_PROMPT = """你是专业的问数场景参数提取引擎
 
 ## 输出契约
 返回一行紧凑 JSON，不要换行或格式化：
-{"slots":{"槽位名":值},"missing_slots":["缺失槽位"],"extraction_source":{"槽位名":"builtin|custom"},"confidence":{"槽位名":"high|medium|low"},"extraction_notes":["说明"]}"""
+{"slots":{"槽位名":值},"missing_slots":["缺失槽位"],"extraction_source":{"builtin槽位名":"builtin"},"confidence":{"槽位名":"high|medium|low"},"extraction_notes":["说明"]}
+
+注意：extraction_source 只包含 builtin 类型的槽位，custom 类型槽位不在此字段中出现。"""
 
 
 SLOT_EXTRACTION_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["slots", "missing_slots", "extraction_source"],
+    "required": ["slots", "missing_slots"],
     "properties": {
         "slots": {
             "type": "object",
@@ -102,8 +109,8 @@ SLOT_EXTRACTION_SCHEMA: dict[str, Any] = {
         },
         "extraction_source": {
             "type": "object",
-            "additionalProperties": {"type": "string", "enum": ["builtin", "custom"]},
-            "description": "每个槽位的提取来源：builtin=内置规则，custom=用户自定义规则",
+            "additionalProperties": {"type": "string", "enum": ["builtin"]},
+            "description": "仅记录使用内置提取器的槽位，custom类型不输出",
         },
         "confidence": {
             "type": "object",
