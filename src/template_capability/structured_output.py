@@ -68,6 +68,24 @@ def build_template_selection_schema(candidate_ids: list[str]) -> dict[str, Any]:
     }
 
 
+def build_template_intent_check_schema() -> dict[str, Any]:
+    """约束模板意图裁决只返回二元判断和简短原因。"""
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["matched", "confidence", "reason"],
+        "properties": {
+            "matched": {"type": "boolean"},
+            "confidence": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+            },
+            "reason": {"type": "string"},
+        },
+    }
+
+
 def build_slot_fill_schema(template: TemplateDefinition, target_slots: list[str]) -> dict[str, Any]:
     """约束模板级补参只能输出目标槽位。"""
     slot_properties = {

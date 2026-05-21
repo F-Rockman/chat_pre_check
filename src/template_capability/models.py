@@ -145,6 +145,12 @@ class MatcherSettings:
     llm_slot_fallback_min_score: float = 0.58
     # 是否允许对已经 MATCHED 的模板也尝试再补充可选槽位。
     llm_slot_fallback_allow_on_matched: bool = False
+    # top1 模板稳定选出后，是否调用 LLM 做模板意图一致性裁决。
+    llm_intent_check_enabled: bool = False
+    # top1 至少达到该分数，才触发意图裁决，避免明显低质候选浪费模型调用。
+    llm_intent_check_min_score: float = 0.58
+    # LLM 返回低于该置信度时，不用它推翻规则链路。
+    llm_intent_check_min_confidence: float = 0.65
 
     def __post_init__(self) -> None:
         # 兼容直接手写 MatcherSettings 的场景；未传权重时补默认值。
