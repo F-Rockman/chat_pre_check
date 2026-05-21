@@ -215,6 +215,30 @@ INTENT_CHECK_SYSTEM_PROMPT = """你是模板意图一致性裁决器。你的唯
 ## 输出契约
 返回 JSON：{"matched": true|false, "confidence": 0到1之间的数值, "reason": "简短判断依据，不超过一句话"}"""
 
+INTENT_CHECK_USER_PROMPT_TEMPLATE = """# 判断任务
+判断以下用户查询的意图是否与已选模板一致。
+
+# 模板能力摘要
+{capability}
+
+# 语义维度（must_terms）
+{dimensions}
+
+# 排除意图（negative_terms）
+{exclusions}
+
+# 查询算子约束（slot_constraints）
+{constraints}
+
+# 输入数据
+input_text: {input_text}
+normalized_text: {normalized_text}
+selected_template: {selected_template}
+rule_candidate: {rule_candidate}
+
+# 输出格式
+返回 JSON: {{\"matched\": true|false, \"confidence\": 0-1, \"reason\": \"简短判断依据\"}}"""
+
 
 @dataclass(slots=True)
 class FallbackSuggestion:
@@ -573,20 +597,15 @@ class OpenAICompatibleTemplateIntentVerifier:
             "slots": candidate.slots,
             "missing_slots": candidate.missing_slots,
         }
-        return (
-            "# 判断任务\n"
-            "判断以下用户查询的意图是否与已选模板一致。\n\n"
-            f"# 模板能力摘要\n{capability}\n\n"
-            f"# 语义维度（must_terms）\n{dimensions}\n\n"
-            f"# 排除意图（negative_terms）\n{exclusions}\n\n"
-            f"# 查询算子约束（slot_constraints）\n{constraints}\n\n"
-            "# 输入数据\n"
-            f"input_text: {input_text}\n"
-            f"normalized_text: {normalized_text}\n"
-            f"selected_template: {json.dumps(template_payload, ensure_ascii=False)}\n"
-            f"rule_candidate: {json.dumps(candidate_payload, ensure_ascii=False)}\n\n"
-            "# 输出格式\n"
-            "返回 JSON: {\"matched\": true|false, \"confidence\": 0-1, \"reason\": \"简短判断依据\"}"
+        return INTENT_CHECK_USER_PROMPT_TEMPLATE.format(
+            capability=capability,
+            dimensions=dimensions,
+            exclusions=exclusions,
+            constraints=constraints,
+            input_text=input_text,
+            normalized_text=normalized_text,
+            selected_template=json.dumps(template_payload, ensure_ascii=False),
+            rule_candidate=json.dumps(candidate_payload, ensure_ascii=False),
         )
 
     def _build_capability_summary(self, template: TemplateDefinition) -> str:
