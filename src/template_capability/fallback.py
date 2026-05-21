@@ -127,6 +127,95 @@ SLOT_EXTRACTION_SCHEMA: dict[str, Any] = {
 }
 
 
+INTENT_CHECK_SYSTEM_PROMPT = """你是模板意图一致性裁决器。你的唯一职责是判断用户查询的意图是否与已选出的 metric-query 模板一致。
+
+# 核心原则
+
+## 裁决任务
+- 你只做二元判断：用户查询意图是否与模板描述的查询类型一致
+- 你不选择其他模板，不填充槽位参数，不修改查询内容
+
+## matched=true 的条件
+当以下条件全部满足时，返回 matched=true：
+1. 查询的核心语义维度与模板 must_terms 各组一致（实体类型、指标名称、比较算子、输出格式）
+2. 查询的输出期望与模板 slot_constraints 中的 query_operator 一致
+3. 措辞可以不同，同义词、近义词、错别字均可接受
+4. 查询可以缺少部分可选参数（如区域、时间范围），模板会使用默认值
+
+## matched=false 的条件
+当以下任一条件成立时，返回 matched=false：
+
+### 输出格式不匹配（最常见偏差）
+- 查询要"数量/有多少/总数/数" → 但模板 query_operator 只支持 list
+- 查询要"排名/排行/top/前N" → 但模板 query_operator 只支持 count
+- 查询要"列表/清单/列出" → 但模板 query_operator 只支持 count 或 topn
+
+### 指标维度不匹配
+- 查询关注"内存" → 但模板 metric 只覆盖 cpu_usage
+- 查询关注"磁盘" → 但模板 metric 只覆盖 cpu_usage 和 memory_usage
+- 查询关注其他指标 → 但模板 slot_constraints.metric 不包含该指标
+
+### 分析型意图（模板只提供数据查询，不做分析）
+- 查询包含"原因/根因/为什么/归因" → 模板只返回原始数据
+- 查询包含"趋势/走势/变化/预测" → 模板只返回当前快照数据
+- 查询包含"分析/对比/建议/优化/解决方案/总结/报告" → 模板只返回查询结果
+
+### 范围不匹配
+- 查询要更广范围（如"所有设备的cpu"）→ 但模板限定特定筛选条件
+- 查询要更窄范围（如"某台具体设备的cpu"）→ 但模板是批量查询
+
+## 边界情况处理
+1. 查询未明确输出格式（如"cpu大于80的设备"）：
+   - 模板是 list 类型且查询无歧义 → matched=true（隐含列表意图）
+   - 查询可理解为多种输出格式 → confidence 降低至 0.6-0.7
+2. 查询包含模板不支持的组合条件（如单指标模板遇到双指标查询）：
+   - 存在更精确的模板可匹配 → matched=false
+   - 无更精确模板且单指标模板可部分回答 → matched=true，confidence 降至 0.65-0.75
+3. 查询包含 negative_terms 中的词 → matched=false
+
+## 置信度校准
+- confidence ≥ 0.85：意图完全一致或完全不一致，判断非常明确
+- confidence 0.65-0.85：意图基本一致但有细微差异，或属于边界情况
+- confidence < 0.65：意图模糊，无法确定（系统不会用此判断推翻规则链路）
+
+## 参考示例
+
+示例1（matched=true — 措辞不同但意图一致）：
+  查询："华东最近cpu超过85的设备清单"
+  模板：查询CPU利用率超过阈值的设备列表（query_operator=list, metric=cpu_usage）
+  输出：{"matched": true, "confidence": 0.92, "reason": "所有语义维度一致，输出格式匹配"}
+
+示例2（matched=false — 输出格式不匹配）：
+  查询："cpu大于80的设备有多少"
+  模板：查询CPU利用率超过阈值的设备列表（query_operator=list）
+  输出：{"matched": false, "confidence": 0.88, "reason": "查询要数量统计，模板只支持列表输出"}
+
+示例3（matched=false — 分析型意图）：
+  查询："cpu大于80的原因"
+  模板：查询CPU利用率超过阈值的设备列表
+  输出：{"matched": false, "confidence": 0.90, "reason": "查询要归因分析，模板只提供数据"}
+
+示例4（matched=true — 隐含输出格式）：
+  查询："cpu大于80的设备"
+  模板：查询CPU利用率超过阈值的设备列表（query_operator=list）
+  输出：{"matched": true, "confidence": 0.78, "reason": "隐含列表意图，语义维度匹配"}
+
+示例5（matched=false — 指标不匹配）：
+  查询："内存大于70的设备列表"
+  模板：查询CPU利用率超过阈值的设备列表（metric=cpu_usage）
+  输出：{"matched": false, "confidence": 0.91, "reason": "查询关注内存指标，模板只覆盖CPU"}
+
+## 禁止行为
+- 不要选择或推荐其他模板
+- 不要填充或修改槽位参数
+- 不要扩展查询内容
+- 不要返回非 JSON 格式内容
+- 不要在 reason 中重复模板定义，只说明判断依据
+
+## 输出契约
+返回 JSON：{"matched": true|false, "confidence": 0到1之间的数值, "reason": "简短判断依据，不超过一句话"}"""
+
+
 @dataclass(slots=True)
 class FallbackSuggestion:
     """模板选择 fallback 的统一返回结构。"""
@@ -426,10 +515,7 @@ class OpenAICompatibleTemplateIntentVerifier:
             "messages": [
                 {
                     "role": "system",
-                    "content": (
-                        "You judge whether a user query has the same intent as one selected metric-query template. "
-                        "Return JSON only. Do not choose another template and do not fill slots."
-                    ),
+                    "content": INTENT_CHECK_SYSTEM_PROMPT,
                 },
                 {
                     "role": "user",
@@ -471,36 +557,114 @@ class OpenAICompatibleTemplateIntentVerifier:
         template: TemplateDefinition,
         candidate: TemplateCandidate,
     ) -> str:
+        capability = self._build_capability_summary(template)
+        dimensions = self._build_must_terms_explanation(template)
+        exclusions = self._build_negative_terms_explanation(template)
+        constraints = self._build_slot_constraints_explanation(template)
         template_payload = {
             "template_id": template.template_id,
             "description": template.description,
             "utterances": template.utterances[:8],
             "required_slots": template.required_slots,
             "optional_slots": template.optional_slots,
-            "required_one_of": [group.to_dict() for group in template.required_one_of],
-            "conditional_required": [rule.to_dict() for rule in template.conditional_required],
-            "mutually_exclusive_slots": [group.to_dict() for group in template.mutually_exclusive_slots],
-            "must_terms": [[rule.term for rule in group] for group in template.must_terms],
-            "negative_terms": [rule.term for rule in template.negative_terms],
-            "slot_constraints": template.slot_constraints,
         }
         candidate_payload = {
             "score": round(candidate.score, 6),
             "slots": candidate.slots,
             "missing_slots": candidate.missing_slots,
-            "trace": candidate.trace,
         }
         return (
-            "Task: decide whether the user query is the same intent as the selected template.\n"
-            "Return matched=false when the query asks for a broader, narrower, alternative, analytical, causal, "
-            "summary, report, prediction, or otherwise different task than the template examples describe.\n"
-            "Return matched=true when wording differs but the query can be answered by exactly this template.\n"
+            "# 判断任务\n"
+            "判断以下用户查询的意图是否与已选模板一致。\n\n"
+            f"# 模板能力摘要\n{capability}\n\n"
+            f"# 语义维度（must_terms）\n{dimensions}\n\n"
+            f"# 排除意图（negative_terms）\n{exclusions}\n\n"
+            f"# 查询算子约束（slot_constraints）\n{constraints}\n\n"
+            "# 输入数据\n"
             f"input_text: {input_text}\n"
             f"normalized_text: {normalized_text}\n"
             f"selected_template: {json.dumps(template_payload, ensure_ascii=False)}\n"
-            f"rule_candidate: {json.dumps(candidate_payload, ensure_ascii=False)}\n"
-            "JSON contract: {\"matched\": true|false, \"confidence\": 0..1, \"reason\": \"short explanation\"}."
+            f"rule_candidate: {json.dumps(candidate_payload, ensure_ascii=False)}\n\n"
+            "# 输出格式\n"
+            "返回 JSON: {\"matched\": true|false, \"confidence\": 0-1, \"reason\": \"简短判断依据\"}"
         )
+
+    def _build_capability_summary(self, template: TemplateDefinition) -> str:
+        """生成模板能力摘要，明确此模板能回答什么、不能回答什么。"""
+        constraints = template.slot_constraints
+        can_parts = [f"此模板回答：{template.description}"]
+        cannot_parts: list[str] = []
+
+        operators = constraints.get("query_operator", [])
+        metrics = constraints.get("metric", [])
+        entities = constraints.get("entity_type", [])
+
+        if operators:
+            op_map = {"list": "列表/清单", "count": "数量统计", "topn": "排名排行"}
+            op_texts = [op_map.get(op, op) for op in operators]
+            can_parts.append(f"输出格式：{'/'.join(op_texts)}")
+            op_cannot = {
+                "list": ["数量统计", "排名排行"],
+                "count": ["列表清单", "排名排行"],
+                "topn": ["数量统计", "列表清单"],
+            }
+            for op in operators:
+                if op in op_cannot:
+                    cannot_parts.extend(op_cannot[op])
+
+        if metrics:
+            can_parts.append(f"指标：{'/'.join(metrics)}")
+
+        if entities:
+            can_parts.append(f"实体：{'/'.join(entities)}")
+
+        cannot_parts.extend(["原因归因", "趋势分析", "对比报告", "优化建议"])
+
+        can_text = "；".join(can_parts)
+        cannot_text = "、".join(sorted(set(cannot_parts)))
+        return f"{can_text}\n此模板不能回答：{cannot_text}"
+
+    def _build_must_terms_explanation(self, template: TemplateDefinition) -> str:
+        """解释 must_terms 各组的语义含义和匹配规则。"""
+        if not template.must_terms:
+            return "无 must_terms 约束（任何查询意图都视为匹配）"
+        lines: list[str] = []
+        for i, group in enumerate(template.must_terms):
+            terms = [rule.term for rule in group]
+            lines.append(f"  维度{i + 1}: {terms}")
+        return (
+            "must_terms 采用 AND-of-OR 结构：每个维度必须命中至少一个词，所有维度都命中才算意图匹配。\n"
+            + "\n".join(lines)
+        )
+
+    def _build_negative_terms_explanation(self, template: TemplateDefinition) -> str:
+        """解释 negative_terms 的含义。"""
+        if not template.negative_terms:
+            return "无 negative_terms 排除约束"
+        terms = [rule.term for rule in template.negative_terms]
+        return (
+            f"以下词汇出现则意图不一致：{terms}\n"
+            "（这些词表示分析型/归因型/总结型意图，与数据查询模板不匹配）"
+        )
+
+    def _build_slot_constraints_explanation(self, template: TemplateDefinition) -> str:
+        """解释 slot_constraints 中各约束对意图判断的影响。"""
+        constraints = template.slot_constraints
+        if not constraints:
+            return "无 slot_constraints 约束"
+        lines: list[str] = []
+        for key, values in constraints.items():
+            if key == "query_operator":
+                lines.append(f"  输出格式约束：query_operator = {values}（模板只支持这些输出格式）")
+            elif key == "metric":
+                lines.append(f"  指标约束：metric = {values}（模板只覆盖这些指标）")
+            elif key == "entity_type":
+                lines.append(f"  实体约束：entity_type = {values}（模板只查询这些实体类型）")
+            elif key == "severity":
+                lines.append(f"  等级约束：severity = {values}（模板只覆盖这些等级）")
+            else:
+                lines.append(f"  {key} = {values}")
+        return "\n".join(lines)
 
     def _post_json_with_schema(
         self,
