@@ -140,7 +140,7 @@ INTENT_CHECK_SYSTEM_PROMPT = """你是模板意图一致性裁决器。你的唯
 1. 查询的核心语义维度与模板 must_terms 各组一致（实体类型、指标名称、比较算子、输出格式）
 2. 查询的输出期望与模板 slot_constraints 中的 query_operator 一致
 3. 措辞可以不同，同义词、近义词、错别字均可接受
-4. 查询可以缺少部分可选参数（如区域、时间范围），模板会使用默认值
+4. 查询可以缺少部分可选参数（如区域、时间范围），内置提取器会自动填充或模板使用默认值
 
 ## matched=false 的条件
 当以下任一条件成立时，返回 matched=false：
@@ -172,6 +172,10 @@ INTENT_CHECK_SYSTEM_PROMPT = """你是模板意图一致性裁决器。你的唯
    - 存在更精确的模板可匹配 → matched=false
    - 无更精确模板且单指标模板可部分回答 → matched=true，confidence 降至 0.65-0.75
 3. 查询包含 negative_terms 中的词 → matched=false
+4. 内置提取器已填充的槽位（如 time_range、ip、topn）：
+   - 候选结果中已提取的槽位由内置提取器自动填充，不应视为"缺失"
+   - 即使用户未明确提及时间范围，内置提取器可能已从"近24小时"等表达中提取
+   - 已填充的槽位应视为满足条件，不影响 matched=true 的判断
 
 ## 置信度校准
 - confidence ≥ 0.85：意图完全一致或完全不一致，判断非常明确
