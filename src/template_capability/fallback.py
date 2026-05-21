@@ -238,6 +238,14 @@ slot_constraints 定义了此模板能回答的查询类型范围：
 - severity：模板覆盖的告警等级
 {slot_constraints_raw}
 
+# 内置提取器（builtin_extractors）
+某些槽位有内置提取器，可以自动从用户输入中提取结构化值（如时间范围"近24小时"→相对时间范围、IP地址、TopN数值），即使用户没有用关键词方式明确提及。
+内置提取器覆盖的槽位: {builtin_slots}
+
+# 候选结果状态
+已提取槽位（由内置提取器自动填充）： {extracted_slots}
+仍缺失槽位: {missing_slots}
+
 # 输入数据
 input_text: {input_text}
 normalized_text: {normalized_text}
@@ -613,6 +621,9 @@ class OpenAICompatibleTemplateIntentVerifier:
         must_terms_dimensions = "\n".join(must_lines) if must_lines else "无约束"
         negative_terms_list = ", ".join([rule.term for rule in template.negative_terms]) if template.negative_terms else "无"
         slot_constraints_raw = json.dumps(constraints, ensure_ascii=False) if constraints else "{}"
+        builtin_slots = ", ".join(sorted(template.slot_extractors.keys())) if template.slot_extractors else "无"
+        extracted_slots = json.dumps(candidate.slots, ensure_ascii=False) if candidate.slots else "{}"
+        missing_slots = ", ".join(candidate.missing_slots) if candidate.missing_slots else "无"
         template_payload = {
             "template_id": template.template_id,
             "description": template.description,
@@ -634,6 +645,9 @@ class OpenAICompatibleTemplateIntentVerifier:
             must_terms_dimensions=must_terms_dimensions,
             negative_terms_list=negative_terms_list,
             slot_constraints_raw=slot_constraints_raw,
+            builtin_slots=builtin_slots,
+            extracted_slots=extracted_slots,
+            missing_slots=missing_slots,
             input_text=input_text,
             normalized_text=normalized_text,
             selected_template=json.dumps(template_payload, ensure_ascii=False),
