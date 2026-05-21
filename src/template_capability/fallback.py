@@ -219,16 +219,24 @@ INTENT_CHECK_USER_PROMPT_TEMPLATE = """# 判断任务
 判断以下用户查询的意图是否与已选模板一致。
 
 # 模板能力摘要
-{capability}
+此模板回答：{description}；输出格式：{output_format}；指标：{metrics}；实体：{entities}
+此模板不能回答：{cannot_answer}
 
 # 语义维度（must_terms）
-{dimensions}
+must_terms 采用 AND-of-OR 结构：每个维度必须命中至少一个词，所有维度都命中才算意图匹配。
+{must_terms_dimensions}
 
 # 排除意图（negative_terms）
-{exclusions}
+以下词汇出现则意图不一致：{negative_terms_list}
+（这些词表示分析型/归因型/总结型意图，与数据查询模板不匹配）
 
 # 查询算子约束（slot_constraints）
-{constraints}
+slot_constraints 定义了此模板能回答的查询类型范围：
+- query_operator：模板支持的输出格式（list=列表/清单, count=数量统计, topn=排名排行）
+- metric：模板覆盖的指标维度
+- entity_type：模板查询的实体类型
+- severity：模板覆盖的告警等级
+{slot_constraints_raw}
 
 # 输入数据
 input_text: {input_text}
@@ -581,10 +589,30 @@ class OpenAICompatibleTemplateIntentVerifier:
         template: TemplateDefinition,
         candidate: TemplateCandidate,
     ) -> str:
-        capability = self._build_capability_summary(template)
-        dimensions = self._build_must_terms_explanation(template)
-        exclusions = self._build_negative_terms_explanation(template)
-        constraints = self._build_slot_constraints_explanation(template)
+        constraints = template.slot_constraints
+        operators = constraints.get("query_operator", [])
+        op_map = {"list": "列表/清单", "count": "数量统计", "topn": "排名排行"}
+        output_format = "/".join([op_map.get(op, op) for op in operators]) if operators else "无约束"
+        metrics = "/".join(constraints.get("metric", [])) if constraints.get("metric") else "无约束"
+        entities = "/".join(constraints.get("entity_type", [])) if constraints.get("entity_type") else "无约束"
+        cannot_parts: list[str] = []
+        op_cannot = {
+            "list": ["数量统计", "排名排行"],
+            "count": ["列表清单", "排名排行"],
+            "topn": ["数量统计", "列表清单"],
+        }
+        for op in operators:
+            if op in op_cannot:
+                cannot_parts.extend(op_cannot[op])
+        cannot_parts.extend(["原因归因", "趋势分析", "对比报告", "优化建议"])
+        cannot_answer = "、".join(sorted(set(cannot_parts)))
+        must_lines: list[str] = []
+        for i, group in enumerate(template.must_terms):
+            terms = "/".join([rule.term for rule in group])
+            must_lines.append(f"  维度{i + 1}: {terms}")
+        must_terms_dimensions = "\n".join(must_lines) if must_lines else "无约束"
+        negative_terms_list = ", ".join([rule.term for rule in template.negative_terms]) if template.negative_terms else "无"
+        slot_constraints_raw = json.dumps(constraints, ensure_ascii=False) if constraints else "{}"
         template_payload = {
             "template_id": template.template_id,
             "description": template.description,
@@ -598,92 +626,19 @@ class OpenAICompatibleTemplateIntentVerifier:
             "missing_slots": candidate.missing_slots,
         }
         return INTENT_CHECK_USER_PROMPT_TEMPLATE.format(
-            capability=capability,
-            dimensions=dimensions,
-            exclusions=exclusions,
-            constraints=constraints,
+            description=template.description,
+            output_format=output_format,
+            metrics=metrics,
+            entities=entities,
+            cannot_answer=cannot_answer,
+            must_terms_dimensions=must_terms_dimensions,
+            negative_terms_list=negative_terms_list,
+            slot_constraints_raw=slot_constraints_raw,
             input_text=input_text,
             normalized_text=normalized_text,
             selected_template=json.dumps(template_payload, ensure_ascii=False),
             rule_candidate=json.dumps(candidate_payload, ensure_ascii=False),
         )
-
-    def _build_capability_summary(self, template: TemplateDefinition) -> str:
-        """生成模板能力摘要，明确此模板能回答什么、不能回答什么。"""
-        constraints = template.slot_constraints
-        can_parts = [f"此模板回答：{template.description}"]
-        cannot_parts: list[str] = []
-
-        operators = constraints.get("query_operator", [])
-        metrics = constraints.get("metric", [])
-        entities = constraints.get("entity_type", [])
-
-        if operators:
-            op_map = {"list": "列表/清单", "count": "数量统计", "topn": "排名排行"}
-            op_texts = [op_map.get(op, op) for op in operators]
-            can_parts.append(f"输出格式：{'/'.join(op_texts)}")
-            op_cannot = {
-                "list": ["数量统计", "排名排行"],
-                "count": ["列表清单", "排名排行"],
-                "topn": ["数量统计", "列表清单"],
-            }
-            for op in operators:
-                if op in op_cannot:
-                    cannot_parts.extend(op_cannot[op])
-
-        if metrics:
-            can_parts.append(f"指标：{'/'.join(metrics)}")
-
-        if entities:
-            can_parts.append(f"实体：{'/'.join(entities)}")
-
-        cannot_parts.extend(["原因归因", "趋势分析", "对比报告", "优化建议"])
-
-        can_text = "；".join(can_parts)
-        cannot_text = "、".join(sorted(set(cannot_parts)))
-        return f"{can_text}\n此模板不能回答：{cannot_text}"
-
-    def _build_must_terms_explanation(self, template: TemplateDefinition) -> str:
-        """解释 must_terms 各组的语义含义和匹配规则。"""
-        if not template.must_terms:
-            return "无 must_terms 约束（任何查询意图都视为匹配）"
-        lines: list[str] = []
-        for i, group in enumerate(template.must_terms):
-            terms = [rule.term for rule in group]
-            lines.append(f"  维度{i + 1}: {terms}")
-        return (
-            "must_terms 采用 AND-of-OR 结构：每个维度必须命中至少一个词，所有维度都命中才算意图匹配。\n"
-            + "\n".join(lines)
-        )
-
-    def _build_negative_terms_explanation(self, template: TemplateDefinition) -> str:
-        """解释 negative_terms 的含义。"""
-        if not template.negative_terms:
-            return "无 negative_terms 排除约束"
-        terms = [rule.term for rule in template.negative_terms]
-        return (
-            f"以下词汇出现则意图不一致：{terms}\n"
-            "（这些词表示分析型/归因型/总结型意图，与数据查询模板不匹配）"
-        )
-
-    def _build_slot_constraints_explanation(self, template: TemplateDefinition) -> str:
-        """解释 slot_constraints 中各约束对意图判断的影响。"""
-        constraints = template.slot_constraints
-        if not constraints:
-            return "无 slot_constraints 约束"
-        lines: list[str] = []
-        for key, values in constraints.items():
-            if key == "query_operator":
-                lines.append(f"  输出格式约束：query_operator = {values}（模板只支持这些输出格式）")
-            elif key == "metric":
-                lines.append(f"  指标约束：metric = {values}（模板只覆盖这些指标）")
-            elif key == "entity_type":
-                lines.append(f"  实体约束：entity_type = {values}（模板只查询这些实体类型）")
-            elif key == "severity":
-                lines.append(f"  等级约束：severity = {values}（模板只覆盖这些等级）")
-            else:
-                lines.append(f"  {key} = {values}")
-        return "\n".join(lines)
 
     def _post_json_with_schema(
         self,
