@@ -51,6 +51,7 @@ def load_template_config(path: str | Path) -> TemplateConfig:
     reranker_payload = matcher_payload.get("reranker", {})
     fallback_payload = matcher_payload.get("llm_fallback", {})
     slot_fallback_payload = matcher_payload.get("llm_slot_fallback", {})
+    intent_check_payload = matcher_payload.get("llm_intent_check", {})
     weights = {
         str(key): float(value)
         for key, value in matcher_payload.get("weights", {}).items()
@@ -85,6 +86,9 @@ def load_template_config(path: str | Path) -> TemplateConfig:
         llm_slot_fallback_max_missing_slots=int(slot_fallback_payload.get("max_missing_slots", 2)),
         llm_slot_fallback_min_score=float(slot_fallback_payload.get("min_score", matcher_payload.get("match_threshold", 0.58))),
         llm_slot_fallback_allow_on_matched=bool(slot_fallback_payload.get("allow_on_matched", False)),
+        llm_intent_check_enabled=bool(intent_check_payload.get("enabled", False)),
+        llm_intent_check_min_score=float(intent_check_payload.get("min_score", matcher_payload.get("match_threshold", 0.58))),
+        llm_intent_check_min_confidence=float(intent_check_payload.get("min_confidence", 0.65)),
     )
 
     query_rewrite = QueryRewriteSettings(

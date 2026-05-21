@@ -8,6 +8,7 @@ from template_capability.config import TemplateConfig, load_template_config
 from template_capability.extractors import build_slot_registry, normalize_text
 from template_capability.fallback import (
     FallbackSuggestion,
+    LLMTemplateIntentVerifier,
     LLMFallbackResolver,
     LLMTemplateSlotResolver,
 )
@@ -78,12 +79,14 @@ class TemplateCapabilityEngine:
         vector_backend: VectorSearchBackend | None = None,
         template_reranker: TemplateReranker | None = None,
         llm_fallback_resolver: LLMFallbackResolver | None = None,
+        llm_template_intent_verifier: LLMTemplateIntentVerifier | None = None,
         llm_template_slot_resolver: LLMTemplateSlotResolver | None = None,
     ) -> None:
         # 直接构造 dataclass 配置时，也要走同一套校验，避免坏配置绕过 load_template_config。
         validate_template_config(config)
         self.config = config
         self.llm_fallback_resolver = llm_fallback_resolver
+        self.llm_template_intent_verifier = llm_template_intent_verifier
         self.llm_template_slot_resolver = llm_template_slot_resolver
         self.query_rewriter = QueryRewriteStateMachine(config.query_rewrite)
         self.slot_registry = build_slot_registry(config.slot_extractors)
@@ -203,6 +206,31 @@ class TemplateCapabilityEngine:
             )
 
         template = self.templates[top.template_id]
+        intent_check_result = self._verify_top_template_intent(
+            input_text=input_text,
+            norm_text=norm_text,
+            candidate=top,
+            template=template,
+        )
+        if intent_check_result is not None and not intent_check_result["matched"]:
+            return MatchResult(
+                template_id=-1,
+                status=MatchStatus.UNMATCHED,
+                score=0.0,
+                query_mode=None,
+                slots=diagnostic_slots,
+                missing_slots=[],
+                trace={
+                    "norm_text": norm_text,
+                    "original_norm_text": original_norm_text,
+                    "shared_slots": shared_slots,
+                    "global_slots": global_slots,
+                    "rewrite_trace": rewrite_result.to_dict(),
+                    "top_candidates": [candidate.to_dict() for candidate in ranked[:5]],
+                    "intent_check": intent_check_result,
+                    "reason": "llm_intent_mismatch",
+                },
+            )
         # top 已经是当前最优模板，先基于规则抽参判断它是 matched 还是 partial。
         slots = dict(top.slots)
         requirement_report = evaluate_slot_requirements(template, slots)
@@ -262,6 +290,7 @@ class TemplateCapabilityEngine:
                 "shared_slots": shared_slots,
                 "global_slots": global_slots,
                 "rewrite_trace": rewrite_result.to_dict(),
+                "intent_check": intent_check_result,
                 "requirement_issues": requirement_report.to_dict()["issues"],
                 "blocking_issue_count": len(requirement_report.issues),
                 "selected_template": top.to_dict(),
@@ -634,6 +663,39 @@ class TemplateCapabilityEngine:
             # 纯冲突型 partial 没有“可补的缺槽位”，不应该走模板级补参。
             return False
         return len(missing_slots) <= self.config.settings.llm_slot_fallback_max_missing_slots
+
+    def _verify_top_template_intent(
+        self,
+        *,
+        input_text: str,
+        norm_text: str,
+        candidate: TemplateCandidate,
+        template: TemplateDefinition,
+    ) -> dict[str, object] | None:
+        """对已选出的 top1 模板做一次 LLM 意图一致性裁决。"""
+        if not self.config.settings.llm_intent_check_enabled:
+            return None
+        if self.llm_template_intent_verifier is None:
+            return None
+        if candidate.score < self.config.settings.llm_intent_check_min_score:
+            return None
+        result = self.llm_template_intent_verifier.verify_intent(
+            input_text=input_text,
+            normalized_text=norm_text,
+            template=template,
+            candidate=candidate,
+        )
+        if result is None:
+            return None
+        should_apply = result.confidence >= self.config.settings.llm_intent_check_min_confidence
+        return {
+            "matched": result.matched if should_apply else True,
+            "raw_matched": result.matched,
+            "confidence": result.confidence,
+            "min_confidence": self.config.settings.llm_intent_check_min_confidence,
+            "applied": should_apply,
+            "trace": result.trace,
+        }
 
     def _resolve_with_fallback(
         self,

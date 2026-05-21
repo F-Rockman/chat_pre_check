@@ -15,6 +15,7 @@ from template_capability.structured_output import (
     build_json_object_response_format,
     build_json_schema_response_format,
     build_slot_fill_schema,
+    build_template_intent_check_schema,
     build_template_selection_schema,
 )
 
@@ -146,6 +147,15 @@ class SlotFallbackSuggestion:
     trace: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(slots=True)
+class IntentVerificationResult:
+    """top1 模板意图一致性裁决结果。"""
+
+    matched: bool
+    confidence: float
+    trace: dict[str, Any] = field(default_factory=dict)
+
+
 class LLMFallbackResolver(Protocol):
     def resolve(
         self,
@@ -169,6 +179,18 @@ class LLMTemplateSlotResolver(Protocol):
         current_slots: dict[str, Any],
         missing_slots: list[str],
     ) -> SlotFallbackSuggestion | None:
+        ...
+
+
+class LLMTemplateIntentVerifier(Protocol):
+    def verify_intent(
+        self,
+        *,
+        input_text: str,
+        normalized_text: str,
+        template: TemplateDefinition,
+        candidate: TemplateCandidate,
+    ) -> IntentVerificationResult | None:
         ...
 
 
@@ -346,6 +368,138 @@ class OpenAICompatibleFallbackResolver:
                 "elapsed_ms": round(elapsed_ms, 2),
                 "reason": reason,
             },
+        )
+
+    def _post_json_with_schema(
+        self,
+        *,
+        payload: dict[str, Any],
+        schema_name: str,
+        schema: dict[str, Any],
+    ) -> tuple[dict[str, Any] | None, str]:
+        if self.prefer_json_schema:
+            json_schema_payload = dict(payload)
+            json_schema_payload["response_format"] = build_json_schema_response_format(name=schema_name, schema=schema)
+            parsed = self._post_json(json_schema_payload)
+            if parsed is not None:
+                return parsed, "json_schema"
+        json_object_payload = dict(payload)
+        json_object_payload["response_format"] = build_json_object_response_format()
+        return self._post_json(json_object_payload), "json_object"
+
+    def _post_json(self, payload: dict[str, Any]) -> dict[str, Any] | None:
+        try:
+            client = self.client or build_openai_client(
+                api_key=self.api_key,
+                base_url=self.base_url,
+                timeout_seconds=self.timeout_seconds,
+            )
+            response = client.chat.completions.create(**payload)
+        except Exception:
+            return None
+        return parse_json_content(extract_chat_completion_content(response))
+
+
+@dataclass(slots=True)
+class OpenAICompatibleTemplateIntentVerifier:
+    """面向 OpenAI 兼容协议的 top1 模板意图一致性裁决。"""
+
+    api_key: str
+    base_url: str
+    model: str
+    timeout_seconds: float = 5.0
+    prefer_json_schema: bool = True
+    client: Any | None = field(default=None, repr=False, compare=False)
+
+    def verify_intent(
+        self,
+        *,
+        input_text: str,
+        normalized_text: str,
+        template: TemplateDefinition,
+        candidate: TemplateCandidate,
+    ) -> IntentVerificationResult | None:
+        start = time.perf_counter()
+        payload = {
+            "model": self.model,
+            "temperature": 0,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "You judge whether a user query has the same intent as one selected metric-query template. "
+                        "Return JSON only. Do not choose another template and do not fill slots."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": self._build_prompt(
+                        input_text=input_text,
+                        normalized_text=normalized_text,
+                        template=template,
+                        candidate=candidate,
+                    ),
+                },
+            ],
+        }
+        raw, response_format_mode = self._post_json_with_schema(
+            payload=payload,
+            schema_name="template_intent_check",
+            schema=build_template_intent_check_schema(),
+        )
+        elapsed_ms = (time.perf_counter() - start) * 1000.0
+        if raw is None:
+            return None
+        confidence = _coerce_score(raw.get("confidence"), default=0.0)
+        return IntentVerificationResult(
+            matched=bool(raw.get("matched", False)),
+            confidence=confidence,
+            trace={
+                "provider": "openai_compatible",
+                "model": self.model,
+                "response_format_mode": response_format_mode,
+                "elapsed_ms": round(elapsed_ms, 2),
+                "reason": str(raw.get("reason", "")).strip(),
+            },
+        )
+
+    def _build_prompt(
+        self,
+        *,
+        input_text: str,
+        normalized_text: str,
+        template: TemplateDefinition,
+        candidate: TemplateCandidate,
+    ) -> str:
+        template_payload = {
+            "template_id": template.template_id,
+            "description": template.description,
+            "utterances": template.utterances[:8],
+            "required_slots": template.required_slots,
+            "optional_slots": template.optional_slots,
+            "required_one_of": [group.to_dict() for group in template.required_one_of],
+            "conditional_required": [rule.to_dict() for rule in template.conditional_required],
+            "mutually_exclusive_slots": [group.to_dict() for group in template.mutually_exclusive_slots],
+            "must_terms": [[rule.term for rule in group] for group in template.must_terms],
+            "negative_terms": [rule.term for rule in template.negative_terms],
+            "slot_constraints": template.slot_constraints,
+        }
+        candidate_payload = {
+            "score": round(candidate.score, 6),
+            "slots": candidate.slots,
+            "missing_slots": candidate.missing_slots,
+            "trace": candidate.trace,
+        }
+        return (
+            "Task: decide whether the user query is the same intent as the selected template.\n"
+            "Return matched=false when the query asks for a broader, narrower, alternative, analytical, causal, "
+            "summary, report, prediction, or otherwise different task than the template examples describe.\n"
+            "Return matched=true when wording differs but the query can be answered by exactly this template.\n"
+            f"input_text: {input_text}\n"
+            f"normalized_text: {normalized_text}\n"
+            f"selected_template: {json.dumps(template_payload, ensure_ascii=False)}\n"
+            f"rule_candidate: {json.dumps(candidate_payload, ensure_ascii=False)}\n"
+            "JSON contract: {\"matched\": true|false, \"confidence\": 0..1, \"reason\": \"short explanation\"}."
         )
 
     def _post_json_with_schema(
