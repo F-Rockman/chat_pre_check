@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from template_capability.config import TemplateConfig
 from template_capability.engine import TemplateCapabilityEngine
-from template_capability.fallback import IntentVerificationResult
-from template_capability.models import MatcherSettings, SlotExtractorDefinition, TemplateDefinition
+from template_capability.fallback import IntentVerificationResult, OpenAICompatibleTemplateIntentVerifier
+from template_capability.models import MatcherSettings, SlotExtractorDefinition, TemplateCandidate, TemplateDefinition
 
 
 class StubIntentVerifier:
@@ -85,6 +85,71 @@ def build_ip_server_engine(verifier: StubIntentVerifier | None = None) -> Templa
     )
 
 
+def build_network_device_engine(verifier: StubIntentVerifier | None = None) -> TemplateCapabilityEngine:
+    return TemplateCapabilityEngine(
+        TemplateConfig(
+            settings=MatcherSettings(
+                match_threshold=0.05,
+                ambiguity_margin=0.03,
+                recall_top_k=10,
+                weights={
+                    "lexical": 1.0,
+                    "sample": 0.0,
+                    "vector": 0.0,
+                    "fusion": 0.0,
+                    "slot_fit": 0.0,
+                    "constraint": 0.0,
+                    "structure": 0.0,
+                },
+                llm_intent_check_enabled=verifier is not None,
+                llm_intent_check_min_score=0.05,
+                llm_intent_check_min_confidence=0.65,
+            ),
+            templates=[
+                TemplateDefinition(
+                    template_id="network_device.info",
+                    query_mode="metric_query",
+                    description="查看网络设备信息",
+                    utterances=["查看网络设备信息", "查询网络设备详情"],
+                    required_slots=[],
+                    optional_slots=[],
+                    must_terms=[["网络设备"], ["信息", "详情"]],
+                    negative_terms=[],
+                    slot_constraints={
+                        "entity_type": ["network_device"],
+                        "query_operator": ["list"],
+                    },
+                    slot_extractors={
+                        "entity_type": SlotExtractorDefinition(
+                            slot_name="entity_type",
+                            extractors=[
+                                {
+                                    "type": "keyword_value",
+                                    "cases": [
+                                        {"terms": ["网络设备"], "value": "network_device"},
+                                    ],
+                                }
+                            ],
+                        ),
+                        "query_operator": SlotExtractorDefinition(
+                            slot_name="query_operator",
+                            extractors=[
+                                {
+                                    "type": "keyword_value",
+                                    "cases": [
+                                        {"terms": ["查看", "查询", "信息", "详情"], "value": "list"},
+                                    ],
+                                }
+                            ],
+                        ),
+                    },
+                )
+            ],
+        ),
+        llm_template_intent_verifier=verifier,
+    )
+
+
 def test_llm_intent_check_allows_same_intent_top1():
     verifier = StubIntentVerifier(
         IntentVerificationResult(matched=True, confidence=0.92, trace={"reason": "same intent"})
@@ -125,3 +190,68 @@ def test_low_confidence_llm_intent_mismatch_does_not_override_rules():
     assert payload["trace"]["intent_check"]["applied"] is False
     assert payload["trace"]["intent_check"]["matched"] is True
     assert payload["trace"]["intent_check"]["raw_matched"] is False
+
+
+def test_llm_intent_check_blocks_region_requirement_when_template_cannot_cover_it():
+    verifier = StubIntentVerifier(
+        IntentVerificationResult(
+            matched=False,
+            confidence=0.91,
+            trace={"reason": "region requirement is not covered"},
+        )
+    )
+    payload = build_network_device_engine(verifier).match("区域A下的网络设备信息").to_dict()
+
+    assert payload["template_id"] == -1
+    assert payload["status"] == "unmatched"
+    assert payload["trace"]["reason"] == "llm_intent_mismatch"
+    assert payload["trace"]["intent_check"]["matched"] is False
+    assert verifier.calls[0]["template_id"] == "network_device.info"
+
+
+def test_intent_check_prompt_frames_match_as_complete_requirement_coverage():
+    verifier = OpenAICompatibleTemplateIntentVerifier(
+        api_key="",
+        base_url="http://example.invalid",
+        model="test-model",
+    )
+    template = TemplateDefinition(
+        template_id="network_device.info",
+        query_mode="metric_query",
+        description="查看网络设备信息",
+        utterances=["查看网络设备信息"],
+        required_slots=[],
+        optional_slots=[],
+        must_terms=[["网络设备"], ["信息"]],
+        negative_terms=[],
+        slot_constraints={"entity_type": ["network_device"], "query_operator": ["list"]},
+        slot_extractors={},
+    )
+    candidate = TemplateCandidate(
+        template_id="network_device.info",
+        query_mode="metric_query",
+        score=0.9,
+        lexical_score=0.9,
+        sample_score=0.0,
+        vector_score=0.0,
+        fusion_score=0.0,
+        rerank_score=0.0,
+        slot_fit_score=1.0,
+        constraint_score=1.0,
+        structure_score=1.0,
+        slots={},
+        missing_slots=[],
+    )
+
+    prompt = verifier._build_prompt(
+        input_text="区域A下的网络设备信息",
+        normalized_text="区域a下的网络设备信息",
+        template=template,
+        candidate=candidate,
+    )
+
+    assert "完整回答" in prompt
+    assert "全部有效需求" in prompt
+    assert "模板可承接的需求槽位" in prompt
+    assert "限定条件" in prompt
+    assert "optional_slots 不是可忽略用户需求" in prompt

@@ -127,23 +127,42 @@ SLOT_EXTRACTION_SCHEMA: dict[str, Any] = {
 }
 
 
-INTENT_CHECK_SYSTEM_PROMPT = """你是模板意图一致性裁决器。你的唯一职责是判断用户查询的意图是否与已选出的 metric-query 模板一致。
+INTENT_CHECK_SYSTEM_PROMPT = """你是模板需求覆盖裁决器。你的唯一职责是判断已选出的 metric-query 模板是否能完整回答用户查询中的全部有效需求。
 
 # 核心原则
 
 ## 裁决任务
-- 你只做二元判断：用户查询意图是否与模板描述的查询类型一致
+- 你只做二元判断：已选模板是否完整覆盖用户查询的全部有效需求
 - 你不选择其他模板，不填充槽位参数，不修改查询内容
+- 你不是判断模板与用户问题是否大致相关；即使核心对象和动作相同，只要有任一有效需求无法承接，也必须返回 matched=false
 
 ## matched=true 的条件
 当以下条件全部满足时，返回 matched=true：
-1. 查询的核心语义维度与模板 must_terms 各组一致（实体类型、指标名称、比较算子、输出格式）
+1. 用户查询中的每一个有效需求，都能被模板 description、must_terms、slot_constraints、required_slots、optional_slots 或 slot_extractors 完整承接
 2. 查询的输出期望与模板 slot_constraints 中的 query_operator 一致
-3. 措辞可以不同，同义词、近义词、错别字均可接受
-4. 查询可以缺少模板支持的可选参数（如区域、时间范围），前提是模板的 optional_slots 或 slot_extractors 中包含该参数；如果查询明确要求按某个维度筛选但模板没有对应槽位，则不满足此条件（见"筛选维度不匹配"）
+3. 查询涉及的实体、指标、字段、范围限定、过滤条件、比较条件、阈值、排序/聚合要求，都在模板能力范围内
+4. 措辞可以不同，同义词、近义词、错别字均可接受，但不能因此忽略用户明确提出的限定条件
+5. 查询可以缺少模板支持的可选参数；但一旦用户明确提出某个需求，模板必须有对应 optional slot、required slot、slot extractor 或 slot constraint 才能承接
+
+## 原子需求拆解
+裁决前先在内部拆解用户查询的原子需求，包括但不限于：
+- 查询对象/实体（如设备、接口、服务器、区域）
+- 查询内容/动作（如查看信息、查询告警、统计数量）
+- 输出形式（如列表/清单、数量/总数、排行/topN）
+- 指标/字段（如 CPU、内存、磁盘、错误包、告警等级）
+- 范围限定（如区域A下、某台设备、指定类型、近24小时）
+- 过滤条件、比较条件和阈值（如超过80、严重告警、同时满足多个指标）
+
+只有当模板能力完整覆盖这些原子需求时，才允许 matched=true。不要把区域、时间、指定对象、指定类型、条件短语当作无关背景词或弱修饰词。
 
 ## matched=false 的条件
 当以下任一条件成立时，返回 matched=false：
+
+### 需求覆盖不足（最高优先级）
+- 用户提出了区域、时间、指定设备、指定实体类型、指标字段、条件、阈值、排序、聚合等任一限定需求，但模板没有对应槽位、提取器或约束能力
+- 模板只能回答用户问题的一部分，会返回比用户要求更宽、更窄或不同口径的结果
+- 核心对象和动作看似一致，但用户额外限定无法承接（如用户问"区域A下的网络设备信息"，模板只能"查看网络设备信息"且没有 region_id 槽位）
+- optional_slots 不是"可忽略用户需求"；它只表示用户可以不提供该参数。用户一旦明确提供，该需求必须被模板承接
 
 ### 输出格式不匹配（最常见偏差）
 - 查询要"数量/有多少/总数/数" → 但模板 query_operator 只支持 list
@@ -160,12 +179,13 @@ INTENT_CHECK_SYSTEM_PROMPT = """你是模板意图一致性裁决器。你的唯
 - 查询包含"趋势/走势/变化/预测" → 模板只返回当前快照数据
 - 查询包含"分析/对比/建议/优化/解决方案/总结/报告" → 模板只返回查询结果
 
-### 范围不匹配
+### 范围或限定条件不匹配
 - 查询要更广范围（如"所有设备的cpu"）→ 但模板限定特定筛选条件
-- 查询要更窄范围（如"某台具体设备的cpu"）→ 但模板是批量查询
+- 查询要更窄范围（如"某台具体设备的cpu"）→ 但模板是批量查询且没有设备选择槽位
+- 查询要求区域、时间、设备、实体类型、告警等级等限定 → 但模板缺少对应槽位或约束
 
-### 筛选维度不匹配
-- 查询明确要求按某个维度筛选（如"区域A下的"、"某台具体设备的"、"近24小时的"）→ 但模板的 slots 和 slot_extractors 中没有对应的筛选参数
+### 需求槽位不匹配
+- 查询明确要求按某个维度限定（如"区域A下的"、"某台具体设备的"、"近24小时的"）→ 但模板的 slots、slot_extractors 或 slot_constraints 中没有对应能力
 - 查询要求按区域筛选 → 但模板没有 region_id 槽位
 - 查询要求按实体类型筛选 → 但模板没有 entity_type 槽位或 slot_constraints.entity_type 不包含该类型
 - 查询要求按时间范围筛选 → 但模板没有 time_range 槽位
@@ -175,8 +195,8 @@ INTENT_CHECK_SYSTEM_PROMPT = """你是模板意图一致性裁决器。你的唯
    - 模板是 list 类型且查询无歧义 → matched=true（隐含列表意图）
    - 查询可理解为多种输出格式 → confidence 降低至 0.6-0.7
 2. 查询包含模板不支持的组合条件（如单指标模板遇到双指标查询）：
-   - 存在更精确的模板可匹配 → matched=false
-   - 无更精确模板且单指标模板可部分回答 → matched=true，confidence 降至 0.65-0.75
+   - 当前模板无法完整覆盖所有指标/条件 → matched=false
+   - 不要假设是否存在其他模板；只判断当前模板是否完整覆盖用户需求
 3. 查询包含 negative_terms 中的词 → matched=false
 4. 内置提取器已填充的槽位（如 time_range、ip、topn）：
    - 候选结果中已提取的槽位由内置提取器自动填充，不应视为"缺失"
@@ -184,16 +204,16 @@ INTENT_CHECK_SYSTEM_PROMPT = """你是模板意图一致性裁决器。你的唯
    - 已填充的槽位应视为满足条件，不影响 matched=true 的判断
 
 ## 置信度校准
-- confidence ≥ 0.85：意图完全一致或完全不一致，判断非常明确
-- confidence 0.65-0.85：意图基本一致但有细微差异，或属于边界情况
+- confidence ≥ 0.85：需求完全覆盖或明确覆盖不足，判断非常明确
+- confidence 0.65-0.85：基本覆盖但有细微差异，或属于边界情况
 - confidence < 0.65：意图模糊，无法确定（系统不会用此判断推翻规则链路）
 
 ## 参考示例
 
-示例1（matched=true — 措辞不同但意图一致）：
+示例1（matched=true — 措辞不同且需求完整覆盖）：
   查询："华东最近cpu超过85的设备清单"
   模板：查询CPU利用率超过阈值的设备列表（query_operator=list, metric=cpu_usage）
-  输出：{"matched": true, "confidence": 0.92, "reason": "所有语义维度一致，输出格式匹配"}
+  输出：{"matched": true, "confidence": 0.92, "reason": "区域、时间、指标、阈值和列表输出均可被模板承接"}
 
 示例2（matched=false — 输出格式不匹配）：
   查询："cpu大于80的设备有多少"
@@ -208,22 +228,32 @@ INTENT_CHECK_SYSTEM_PROMPT = """你是模板意图一致性裁决器。你的唯
 示例4（matched=true — 隐含输出格式）：
   查询："cpu大于80的设备"
   模板：查询CPU利用率超过阈值的设备列表（query_operator=list）
-  输出：{"matched": true, "confidence": 0.78, "reason": "隐含列表意图，语义维度匹配"}
+  输出：{"matched": true, "confidence": 0.78, "reason": "隐含列表意图，指标和阈值需求均被模板覆盖"}
 
 示例5（matched=false — 指标不匹配）：
   查询："内存大于70的设备列表"
   模板：查询CPU利用率超过阈值的设备列表（metric=cpu_usage）
   输出：{"matched": false, "confidence": 0.91, "reason": "查询关注内存指标，模板只覆盖CPU"}
 
-示例6（matched=false — 筛选维度不匹配）：
+示例6（matched=false — 用户限定条件无法承接）：
   查询："区域A下的网络设备信息"
   模板：查询网络设备信息（无 region_id 槽位，optional_slots 无区域参数）
-  输出：{"matched": false, "confidence": 0.85, "reason": "查询要求按区域筛选，但模板不支持区域过滤"}
+  输出：{"matched": false, "confidence": 0.90, "reason": "用户要求限定区域A，但模板没有区域槽位，无法完整覆盖需求"}
 
-示例7（matched=true — 筛选维度有对应槽位）：
-  查询："华东cpu超过85的设备列表"
-  模板：查询CPU利用率超过阈值的设备列表（optional_slots 含 region_id，slot_extractors 含 region_id）
-  输出：{"matched": true, "confidence": 0.90, "reason": "查询的区域筛选有对应槽位支持，所有维度匹配"}
+示例7（matched=true — 用户限定条件有对应槽位）：
+  查询："区域A下的网络设备信息"
+  模板：查询网络设备信息（optional_slots 含 region_id，slot_extractors 含 region_id）
+  输出：{"matched": true, "confidence": 0.90, "reason": "区域限定和网络设备信息查询需求均可被模板承接"}
+
+示例8（matched=false — 组合指标无法完整覆盖）：
+  查询："CPU超过80且内存超过70的设备列表"
+  模板：查询CPU利用率超过阈值的设备列表（metric=cpu_usage）
+  输出：{"matched": false, "confidence": 0.88, "reason": "查询同时要求CPU和内存条件，模板只能覆盖CPU需求"}
+
+示例9（matched=false — 时间限定无法承接）：
+  查询："近24小时严重告警数量"
+  模板：查询严重告警数量（无 time_range 槽位）
+  输出：{"matched": false, "confidence": 0.86, "reason": "用户要求近24小时时间范围，但模板没有时间槽位"}
 
 ## 禁止行为
 - 不要选择或推荐其他模板
@@ -236,14 +266,14 @@ INTENT_CHECK_SYSTEM_PROMPT = """你是模板意图一致性裁决器。你的唯
 返回 JSON：{"matched": true|false, "confidence": 0到1之间的数值, "reason": "简短判断依据，不超过一句话"}"""
 
 INTENT_CHECK_USER_PROMPT_TEMPLATE = """# 判断任务
-判断以下用户查询的意图是否与已选模板一致。
+判断已选模板是否能完整回答以下用户查询，要求覆盖用户查询中的全部有效需求。
 
 # 模板能力摘要
 此模板回答：{description}；输出格式：{output_format}；指标：{metrics}；实体：{entities}
 此模板不能回答：{cannot_answer}
 
 # 语义维度（must_terms）
-must_terms 采用 AND-of-OR 结构：每个维度必须命中至少一个词，所有维度都命中才算意图匹配。
+must_terms 采用 AND-of-OR 结构：每个维度表示模板支持的一类语义需求。用户表达可以使用同义词或近义词，但不能忽略用户额外提出的限定需求。
 {must_terms_dimensions}
 
 # 排除意图（negative_terms）
@@ -258,9 +288,10 @@ slot_constraints 定义了此模板能回答的查询类型范围：
 - severity：模板覆盖的告警等级
 {slot_constraints_raw}
 
-# 模板支持的筛选维度
-此模板可通过以下槽位进行筛选：{filtering_dimensions}
-查询中出现的筛选条件必须在此列表中有对应槽位，否则视为筛选维度不匹配。
+# 模板可承接的需求槽位
+此模板可通过以下槽位承接用户需求：{supported_requirement_slots}
+用户文本中的区域、时间、指定对象、指定类型、条件、阈值、排序、聚合等限定条件，必须能映射到这些槽位或 slot_constraints，否则属于需求覆盖不足。
+optional_slots 不是可忽略用户需求；它只表示用户可以不提供该参数。一旦用户明确提出，模板必须能承接。
 
 # 内置提取器（builtin_extractors）
 某些槽位有内置提取器，可以自动从用户输入中提取结构化值（如时间范围"近24小时"→相对时间范围、IP地址、TopN数值），即使用户没有用关键词方式明确提及。
@@ -646,10 +677,14 @@ class OpenAICompatibleTemplateIntentVerifier:
         negative_terms_list = ", ".join([rule.term for rule in template.negative_terms]) if template.negative_terms else "无"
         slot_constraints_raw = json.dumps(constraints, ensure_ascii=False) if constraints else "{}"
         builtin_slots = ", ".join(sorted(template.slot_extractors.keys())) if template.slot_extractors else "无"
-        all_filter_slots = set(template.required_slots) | set(template.optional_slots)
+        supported_requirement_slot_set = set(template.required_slots) | set(template.optional_slots)
         if template.slot_extractors:
-            all_filter_slots |= set(template.slot_extractors.keys())
-        filtering_dimensions = ", ".join(sorted(all_filter_slots)) if all_filter_slots else "无"
+            supported_requirement_slot_set |= set(template.slot_extractors.keys())
+        supported_requirement_slots = (
+            ", ".join(sorted(supported_requirement_slot_set))
+            if supported_requirement_slot_set
+            else "无"
+        )
         extracted_slots = json.dumps(candidate.slots, ensure_ascii=False) if candidate.slots else "{}"
         missing_slots = ", ".join(candidate.missing_slots) if candidate.missing_slots else "无"
         template_payload = {
@@ -673,7 +708,7 @@ class OpenAICompatibleTemplateIntentVerifier:
             must_terms_dimensions=must_terms_dimensions,
             negative_terms_list=negative_terms_list,
             slot_constraints_raw=slot_constraints_raw,
-            filtering_dimensions=filtering_dimensions,
+            supported_requirement_slots=supported_requirement_slots,
             builtin_slots=builtin_slots,
             extracted_slots=extracted_slots,
             missing_slots=missing_slots,
