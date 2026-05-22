@@ -140,7 +140,7 @@ INTENT_CHECK_SYSTEM_PROMPT = """你是模板意图一致性裁决器。你的唯
 1. 查询的核心语义维度与模板 must_terms 各组一致（实体类型、指标名称、比较算子、输出格式）
 2. 查询的输出期望与模板 slot_constraints 中的 query_operator 一致
 3. 措辞可以不同，同义词、近义词、错别字均可接受
-4. 查询可以缺少部分可选参数（如区域、时间范围），内置提取器会自动填充或模板使用默认值
+4. 查询可以缺少模板支持的可选参数（如区域、时间范围），前提是模板的 optional_slots 或 slot_extractors 中包含该参数；如果查询明确要求按某个维度筛选但模板没有对应槽位，则不满足此条件（见"筛选维度不匹配"）
 
 ## matched=false 的条件
 当以下任一条件成立时，返回 matched=false：
@@ -163,6 +163,12 @@ INTENT_CHECK_SYSTEM_PROMPT = """你是模板意图一致性裁决器。你的唯
 ### 范围不匹配
 - 查询要更广范围（如"所有设备的cpu"）→ 但模板限定特定筛选条件
 - 查询要更窄范围（如"某台具体设备的cpu"）→ 但模板是批量查询
+
+### 筛选维度不匹配
+- 查询明确要求按某个维度筛选（如"区域A下的"、"某台具体设备的"、"近24小时的"）→ 但模板的 slots 和 slot_extractors 中没有对应的筛选参数
+- 查询要求按区域筛选 → 但模板没有 region_id 槽位
+- 查询要求按实体类型筛选 → 但模板没有 entity_type 槽位或 slot_constraints.entity_type 不包含该类型
+- 查询要求按时间范围筛选 → 但模板没有 time_range 槽位
 
 ## 边界情况处理
 1. 查询未明确输出格式（如"cpu大于80的设备"）：
@@ -209,6 +215,16 @@ INTENT_CHECK_SYSTEM_PROMPT = """你是模板意图一致性裁决器。你的唯
   模板：查询CPU利用率超过阈值的设备列表（metric=cpu_usage）
   输出：{"matched": false, "confidence": 0.91, "reason": "查询关注内存指标，模板只覆盖CPU"}
 
+示例6（matched=false — 筛选维度不匹配）：
+  查询："区域A下的网络设备信息"
+  模板：查询网络设备信息（无 region_id 槽位，optional_slots 无区域参数）
+  输出：{"matched": false, "confidence": 0.85, "reason": "查询要求按区域筛选，但模板不支持区域过滤"}
+
+示例7（matched=true — 筛选维度有对应槽位）：
+  查询："华东cpu超过85的设备列表"
+  模板：查询CPU利用率超过阈值的设备列表（optional_slots 含 region_id，slot_extractors 含 region_id）
+  输出：{"matched": true, "confidence": 0.90, "reason": "查询的区域筛选有对应槽位支持，所有维度匹配"}
+
 ## 禁止行为
 - 不要选择或推荐其他模板
 - 不要填充或修改槽位参数
@@ -241,6 +257,10 @@ slot_constraints 定义了此模板能回答的查询类型范围：
 - entity_type：模板查询的实体类型
 - severity：模板覆盖的告警等级
 {slot_constraints_raw}
+
+# 模板支持的筛选维度
+此模板可通过以下槽位进行筛选：{filtering_dimensions}
+查询中出现的筛选条件必须在此列表中有对应槽位，否则视为筛选维度不匹配。
 
 # 内置提取器（builtin_extractors）
 某些槽位有内置提取器，可以自动从用户输入中提取结构化值（如时间范围"近24小时"→相对时间范围、IP地址、TopN数值），即使用户没有用关键词方式明确提及。
@@ -626,6 +646,10 @@ class OpenAICompatibleTemplateIntentVerifier:
         negative_terms_list = ", ".join([rule.term for rule in template.negative_terms]) if template.negative_terms else "无"
         slot_constraints_raw = json.dumps(constraints, ensure_ascii=False) if constraints else "{}"
         builtin_slots = ", ".join(sorted(template.slot_extractors.keys())) if template.slot_extractors else "无"
+        all_filter_slots = set(template.required_slots) | set(template.optional_slots)
+        if template.slot_extractors:
+            all_filter_slots |= set(template.slot_extractors.keys())
+        filtering_dimensions = ", ".join(sorted(all_filter_slots)) if all_filter_slots else "无"
         extracted_slots = json.dumps(candidate.slots, ensure_ascii=False) if candidate.slots else "{}"
         missing_slots = ", ".join(candidate.missing_slots) if candidate.missing_slots else "无"
         template_payload = {
@@ -649,6 +673,7 @@ class OpenAICompatibleTemplateIntentVerifier:
             must_terms_dimensions=must_terms_dimensions,
             negative_terms_list=negative_terms_list,
             slot_constraints_raw=slot_constraints_raw,
+            filtering_dimensions=filtering_dimensions,
             builtin_slots=builtin_slots,
             extracted_slots=extracted_slots,
             missing_slots=missing_slots,
