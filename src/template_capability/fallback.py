@@ -34,6 +34,7 @@ SLOT_EXTRACTION_SYSTEM_PROMPT = """你是专业的问数场景参数提取引擎
    - **用户自定义提取器（slot_hints）**：keyword_value 类型提供关键词映射，regex 类型提供正则规则
    - **内置提取器（builtin_extractors）**：系统内置的提取能力，理解其 output_format 以正确填充
    - **regex 是强约束**：regex 槽位必须确认用户表达完整落到某个 pattern 描述的结构，不能只凭模板上下文、默认值或近似语义补值
+   - **pattern 是原子授权项**：不能把不同 pattern / case 里的属性、实体、对象、指标、枚举值拆开后重新组合
 3. **置信度评估**：
    - high：用户明确提及，且匹配提取器规则
    - medium：用户提及但需推断
@@ -63,6 +64,7 @@ SLOT_EXTRACTION_SYSTEM_PROMPT = """你是专业的问数场景参数提取引擎
    - 如果值匹配 keyword_value 的某个 case（用户表达 → 预定义值映射）→ 使用 custom 规则
    - 如果值匹配 regex 的某个 pattern（正则提取）→ 使用 custom 规则
    - 如果 regex 没有完整命中任何 pattern，必须把该槽位视为缺失，不能用 LLM 猜测补齐
+   - 如果用户问题只是分别命中了多个 pattern 的一部分，但没有单个 pattern 覆盖该组合，必须视为缺失
 
 2. **其次检查 builtin_extractors（内置规则）**：
    - 如果值符合 builtin_extractors 的 output_format 结构 → 使用 builtin 规则
@@ -86,6 +88,7 @@ SLOT_EXTRACTION_SYSTEM_PROMPT = """你是专业的问数场景参数提取引擎
 - 不要猜测超出 slot_constraints 的值
 - 不要用低置信度值填充必填槽位
 - 不要为未命中 regex pattern 的 regex 槽位返回值
+- 不要跨 pattern 拼出配置里没有显式授权的组合
 - 不要返回非 JSON 格式内容
 - **不要直接返回原始文本表达（如"昨晚八点"），必须转换为结构化格式**
 
@@ -146,6 +149,7 @@ INTENT_CHECK_SYSTEM_PROMPT = """你是模板需求覆盖裁决器。你的唯一
 3. 查询涉及的实体、指标、字段、范围限定、过滤条件、比较条件、阈值、排序/聚合要求，都在模板能力范围内
 4. 措辞可以不同，同义词、近义词、错别字均可接受，但不能因此忽略用户明确提出的限定条件
 5. 查询可以缺少模板支持的可选参数；但一旦用户明确提出某个需求，模板必须有对应 optional slot、required slot、slot extractor 或 slot constraint 才能承接
+6. 如果能力依赖 regex pattern 或 keyword case，单条 pattern/case 必须完整承接用户组合；不能把不同 pattern/case 中分别出现过的属性、实体、对象、指标或枚举值重新组合成 matched=true
 
 ## 原子需求拆解
 裁决前先在内部拆解用户查询的原子需求，包括但不限于：
@@ -192,6 +196,7 @@ INTENT_CHECK_SYSTEM_PROMPT = """你是模板需求覆盖裁决器。你的唯一
 - 查询要求按区域筛选 → 但模板没有 region_id 槽位
 - 查询要求按实体类型筛选 → 但模板没有 entity_type 槽位或 slot_constraints.entity_type 不包含该类型
 - 查询要求按时间范围筛选 → 但模板没有 time_range 槽位
+- 查询要求的属性/实体/对象组合没有被任一单条 pattern/case 完整授权，只是组合里的局部词分别出现在不同 pattern/case 中
 
 ## 边界情况处理
 1. 查询未明确输出格式（如"cpu大于80的设备"）：
@@ -484,6 +489,8 @@ class OpenAICompatibleFallbackResolver:
             f"candidates: {json.dumps(candidate_payload, ensure_ascii=False)}\n"
             "Choose the candidate that best explains the query constraints, or return -1 if none is reliable. "
             "If a candidate is already right but misses one or two obvious values, you may fill those missing slots. "
+            "Treat every regex pattern and keyword case as an indivisible authorization. Do not recombine fragments "
+            "from different patterns or cases into a new attribute/entity/object/value combination. "
             "Do not invent a template id that is not listed."
         )
 
@@ -861,6 +868,10 @@ class OpenAICompatibleTemplateSlotResolver:
             "Regex rule: if a target slot has regex hints, only fill it when the user text clearly and completely "
             "matches one listed pattern, including its key semantic parts such as metric/object, comparator, value, "
             "unit, and ordering words. If no pattern is matched, omit that slot.\n"
+            "Atomic pattern rule: each regex pattern or keyword case is an indivisible authorization, not an example "
+            "to recombine. Never combine attribute/entity/object/value fragments from different patterns or cases. "
+            "For example, if configured patterns only authorize attribute A with device b, and attribute B with "
+            "device a, a query asking for attribute A with device a is not authorized and must be omitted.\n"
             "Return JSON like {\"slots\": {\"slot_name\": value}}. "
             "Do not invent unsupported values. Omit unknown slots."
         )
@@ -902,7 +913,9 @@ class OpenAICompatibleTemplateSlotResolver:
                             "patterns": [
                                 {
                                     "pattern": pattern.get("pattern"),
+                                    "group": pattern.get("group", 1),
                                     "value_type": pattern.get("value_type", "string"),
+                                    "value": pattern.get("value"),
                                     "min": pattern.get("min"),
                                     "max": pattern.get("max"),
                                 }
@@ -1058,6 +1071,7 @@ def build_optimized_slot_extraction_prompt(
 2. 内置提取器（builtin_extractors）描述了系统内置的提取能力，理解其 output_format
 3. 用户自定义提取器（slot_hints）提供了关键词映射和正则规则
    - regex 槽位只有在用户表达完整命中某个 pattern 时才允许输出；否则必须省略该槽位
+   - pattern/case 是不可拆分的授权项；禁止把不同 pattern/case 里的属性、实体、对象、指标或枚举值重新组合成新配置
 4. 当前系统时间用于计算绝对时间范围（如"上周一到上周五"、"最近3天"的起止时间）
 5. 提取来源标识：
    - 使用内置规则提取 → extraction_source 标记为 "builtin"，按 output_format 输出

@@ -476,6 +476,84 @@ def test_template_slot_fallback_rejects_regex_slot_without_pattern_match():
     assert slot_resolver.calls
 
 
+def test_template_slot_fallback_rejects_cross_pattern_combination():
+    backend = StubVectorBackend()
+    slot_resolver = StubTemplateSlotResolver(
+        SlotFallbackSuggestion(
+            slots={"device_id": "device_a"},
+            trace={"source": "stub_slot"},
+        )
+    )
+    engine = TemplateCapabilityEngine(
+        TemplateConfig(
+            settings=MatcherSettings(
+                match_threshold=0.2,
+                ambiguity_margin=0.03,
+                recall_top_k=10,
+                weights={
+                    "lexical": 0.8,
+                    "sample": 0.1,
+                    "vector": 0.0,
+                    "slot_fit": 0.1,
+                },
+                vector_dimension=512,
+                llm_slot_fallback_enabled=True,
+                llm_slot_fallback_max_missing_slots=1,
+                llm_slot_fallback_min_score=0.2,
+            ),
+            templates=[
+                TemplateDefinition(
+                    template_id="device.attribute.demo",
+                    query_mode="metric_query",
+                    description="查询指定属性下的设备信息",
+                    utterances=["属性A包含F的设备b信息", "属性B包含F的设备a信息"],
+                    required_slots=["device_id"],
+                    optional_slots=[],
+                    must_terms=[["属性"], ["设备"], ["信息"]],
+                    negative_terms=[],
+                    slot_constraints={},
+                    slot_extractors={
+                        "device_id": SlotExtractorDefinition(
+                            slot_name="device_id",
+                            extractors=[
+                                {
+                                    "type": "regex",
+                                    "patterns": [
+                                        {
+                                            "pattern": "属性A包含F的设备b信息",
+                                            "value": "device_b",
+                                        },
+                                        {
+                                            "pattern": "属性B包含F的设备a信息",
+                                            "value": "device_a",
+                                        },
+                                    ],
+                                }
+                            ],
+                        )
+                    },
+                    llm_slot_extraction={
+                        "enabled": True,
+                        "slots": ["device_id"],
+                    },
+                )
+            ],
+        ),
+        vector_backend=backend,
+        llm_template_slot_resolver=slot_resolver,
+    )
+
+    payload = engine.match("属性A包含F的设备a信息").to_dict()
+    assert payload["template_id"] == "device.attribute.demo"
+    assert payload["status"] == "partial"
+    assert "device_id" not in payload["slots"]
+    assert payload["missing_slots"] == ["device_id"]
+    selected_trace = payload["trace"]["selected_template"]["trace"]
+    assert selected_trace["slot_fallback_used"] is False
+    assert selected_trace["slot_fallback_rejected_slots"]["device_id"]["reason"] == "regex_pattern_not_matched"
+    assert slot_resolver.calls
+
+
 def test_ambiguous_templates_return_minus_one():
     config = TemplateConfig(
         settings=MatcherSettings(
