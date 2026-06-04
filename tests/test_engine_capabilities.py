@@ -372,6 +372,110 @@ def test_template_slot_fallback_can_fill_missing_slots_after_match():
     assert slot_resolver.calls
 
 
+def test_template_slot_fallback_rejects_regex_slot_without_pattern_match():
+    backend = StubVectorBackend()
+    slot_resolver = StubTemplateSlotResolver(
+        SlotFallbackSuggestion(
+            slots={"topn": 10},
+            trace={"source": "stub_slot"},
+        )
+    )
+    engine = TemplateCapabilityEngine(
+        TemplateConfig(
+            settings=MatcherSettings(
+                match_threshold=0.58,
+                ambiguity_margin=0.03,
+                recall_top_k=10,
+                weights={
+                    "lexical": 0.7,
+                    "vector": 0.0,
+                    "slot_fit": 0.2,
+                    "constraint": 0.1,
+                },
+                vector_dimension=512,
+                llm_slot_fallback_enabled=True,
+                llm_slot_fallback_max_missing_slots=1,
+                llm_slot_fallback_min_score=0.58,
+            ),
+            slot_extractors={
+                "time_range": SlotExtractorDefinition(
+                    slot_name="time_range",
+                    extractors=[
+                        {
+                            "type": "keyword_value",
+                            "cases": [
+                                {
+                                    "terms": ["近24小时"],
+                                    "value": {"mode": "relative", "preset": "last_24h"},
+                                }
+                            ],
+                        }
+                    ],
+                ),
+                "query_operator": SlotExtractorDefinition(
+                    slot_name="query_operator",
+                    extractors=[
+                        {
+                            "type": "keyword_value",
+                            "cases": [
+                                {"terms": ["top", "前", "排名", "排行"], "value": "topn"}
+                            ],
+                        }
+                    ],
+                ),
+            },
+            templates=[
+                TemplateDefinition(
+                    template_id="metric.rank.demo",
+                    query_mode="metric_query",
+                    description="查询演示指标排名",
+                    utterances=["近24小时演示指标Top10"],
+                    required_slots=["time_range", "query_operator", "topn"],
+                    optional_slots=[],
+                    must_terms=[["演示指标"], ["top", "前", "排名", "排行"]],
+                    negative_terms=[],
+                    slot_constraints={"query_operator": ["topn"]},
+                    slot_extractors={
+                        "topn": SlotExtractorDefinition(
+                            slot_name="topn",
+                            extractors=[
+                                {
+                                    "type": "regex",
+                                    "patterns": [
+                                        {
+                                            "pattern": "(?:top\\s*|前)\\s*(\\d+)",
+                                            "group": 1,
+                                            "value_type": "int",
+                                            "min": 1,
+                                            "max": 1000,
+                                        }
+                                    ],
+                                }
+                            ],
+                        )
+                    },
+                    llm_slot_extraction={
+                        "enabled": True,
+                        "slots": ["topn"],
+                    },
+                )
+            ],
+        ),
+        vector_backend=backend,
+        llm_template_slot_resolver=slot_resolver,
+    )
+
+    payload = engine.match("近24小时演示指标排行").to_dict()
+    assert payload["template_id"] == "metric.rank.demo"
+    assert payload["status"] == "partial"
+    assert "topn" not in payload["slots"]
+    assert payload["missing_slots"] == ["topn"]
+    selected_trace = payload["trace"]["selected_template"]["trace"]
+    assert selected_trace["slot_fallback_used"] is False
+    assert selected_trace["slot_fallback_rejected_slots"]["topn"]["reason"] == "regex_pattern_not_matched"
+    assert slot_resolver.calls
+
+
 def test_ambiguous_templates_return_minus_one():
     config = TemplateConfig(
         settings=MatcherSettings(

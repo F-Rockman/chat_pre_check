@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+from typing import Any
 
 from template_capability.config import TemplateConfig, load_template_config
 from template_capability.extractors import build_slot_registry, normalize_text
@@ -95,9 +96,13 @@ class TemplateCapabilityEngine:
         self.templates = {template.template_id: template for template in config.templates}
         # 每个模板都维护一套独立的槽位抽取器。这样模板之间可以复用槽位名，
         # 但不需要共享完全一致的提参逻辑。
-        self.template_slot_registries = {
-            template.template_id: build_slot_registry(self._build_template_slot_definitions(template))
+        self.template_slot_definitions = {
+            template.template_id: self._build_template_slot_definitions(template)
             for template in config.templates
+        }
+        self.template_slot_registries = {
+            template_id: build_slot_registry(definitions)
+            for template_id, definitions in self.template_slot_definitions.items()
         }
         # 下面这些结构都是预计算索引，避免在线匹配时重复处理模板文本。
         self.template_documents = {
@@ -593,9 +598,25 @@ class TemplateCapabilityEngine:
         )
         if suggestion is None or not suggestion.slots:
             return candidate
+        accepted_slots, rejected_slots = self._filter_template_slot_fallback_slots(
+            template=template,
+            norm_text=norm_text,
+            candidate=candidate,
+            missing_slots=missing_slots,
+            suggested_slots=suggestion.slots,
+        )
+        if not accepted_slots:
+            return _copy_candidate_with_trace(
+                candidate,
+                {
+                    "slot_fallback_used": False,
+                    "slot_fallback_trace": suggestion.trace,
+                    "slot_fallback_rejected_slots": rejected_slots,
+                },
+            )
         # LLM 只补充缺失值，不覆盖已有槽位的业务判断结果。
         merged_slots = dict(candidate.slots)
-        merged_slots.update(suggestion.slots)
+        merged_slots.update(accepted_slots)
         # 补参后要重新算一次分数，因为 slot_fit/structure/constraint 都可能变化。
         rerank_weights = adaptive_score_weights(
             self.config.settings.weights,
@@ -632,8 +653,82 @@ class TemplateCapabilityEngine:
                 **enriched.trace,
                 "slot_fallback_used": True,
                 "slot_fallback_trace": suggestion.trace,
+                "slot_fallback_accepted_slots": sorted(accepted_slots),
+                "slot_fallback_rejected_slots": rejected_slots,
             },
             metadata=enriched.metadata,
+        )
+
+    def _filter_template_slot_fallback_slots(
+        self,
+        *,
+        template: TemplateDefinition,
+        norm_text: str,
+        candidate: TemplateCandidate,
+        missing_slots: list[str],
+        suggested_slots: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
+        """对 LLM 补参结果做服务端复核，避免模型越权填槽位。
+
+        regex 类型的槽位必须由规则 extractor 在用户文本中真实命中；
+        如果规则链路都抽不出来，说明用户表达没有落到任何已配置 pattern，
+        LLM 不能仅凭语义猜测补上这个槽位。
+        """
+        accepted: dict[str, Any] = {}
+        rejected: dict[str, dict[str, Any]] = {}
+        allowed_slots = self._allowed_template_slot_fallback_slots(template, missing_slots)
+        rule_slots = self.template_slot_registries[template.template_id].extract(norm_text)
+
+        for raw_slot_name, value in suggested_slots.items():
+            slot_name = str(raw_slot_name).strip()
+            if not slot_name:
+                continue
+            if slot_name not in allowed_slots:
+                rejected[slot_name] = {"reason": "slot_not_allowed"}
+                continue
+            if value in (None, ""):
+                rejected[slot_name] = {"reason": "empty_value"}
+                continue
+            if candidate.slots.get(slot_name) not in (None, ""):
+                rejected[slot_name] = {"reason": "existing_rule_slot"}
+                continue
+            if self._slot_has_regex_extractor(template.template_id, slot_name):
+                rule_value = rule_slots.get(slot_name)
+                if rule_value in (None, ""):
+                    rejected[slot_name] = {"reason": "regex_pattern_not_matched"}
+                    continue
+                if not _slot_values_equivalent(rule_value, value):
+                    rejected[slot_name] = {
+                        "reason": "regex_value_mismatch",
+                        "rule_value": rule_value,
+                    }
+                    continue
+                accepted[slot_name] = rule_value
+                continue
+            accepted[slot_name] = value
+        return accepted, rejected
+
+    def _allowed_template_slot_fallback_slots(
+        self,
+        template: TemplateDefinition,
+        missing_slots: list[str],
+    ) -> set[str]:
+        configured_slots = {
+            str(slot_name).strip()
+            for slot_name in template.llm_slot_extraction.get("slots", [])
+            if str(slot_name).strip()
+        }
+        if configured_slots:
+            return configured_slots
+        return {str(slot_name).strip() for slot_name in missing_slots if str(slot_name).strip()}
+
+    def _slot_has_regex_extractor(self, template_id: str, slot_name: str) -> bool:
+        definition = self.template_slot_definitions.get(template_id, {}).get(slot_name)
+        if definition is None:
+            return False
+        return any(
+            str(extractor.get("type", "")).strip().lower() == "regex"
+            for extractor in definition.extractors
         )
 
     def _should_use_template_slot_fallback(
@@ -849,6 +944,40 @@ def _merge_slot_maps(*slot_maps: dict[str, object]) -> dict[str, object]:
                 continue
             merged[slot_name] = value
     return merged
+
+
+def _slot_values_equivalent(left: Any, right: Any) -> bool:
+    """比较规则 extractor 和 LLM 返回值，兼容 int/float 这类等价值。"""
+    if left == right:
+        return True
+    try:
+        return float(left) == float(right)
+    except (TypeError, ValueError):
+        return str(left) == str(right)
+
+
+def _copy_candidate_with_trace(
+    candidate: TemplateCandidate,
+    trace_updates: dict[str, Any],
+) -> TemplateCandidate:
+    """复制候选并追加 trace，用于记录被拒绝的补参尝试。"""
+    return TemplateCandidate(
+        template_id=candidate.template_id,
+        query_mode=candidate.query_mode,
+        score=candidate.score,
+        lexical_score=candidate.lexical_score,
+        sample_score=candidate.sample_score,
+        vector_score=candidate.vector_score,
+        fusion_score=candidate.fusion_score,
+        rerank_score=candidate.rerank_score,
+        slot_fit_score=candidate.slot_fit_score,
+        constraint_score=candidate.constraint_score,
+        structure_score=candidate.structure_score,
+        slots=dict(candidate.slots),
+        missing_slots=list(candidate.missing_slots),
+        trace={**candidate.trace, **trace_updates},
+        metadata=dict(candidate.metadata),
+    )
 
 
 def _unexpected_global_slots(template: TemplateDefinition, global_slots: dict[str, object]) -> list[str]:

@@ -935,6 +935,10 @@ start-template-studio.cmd
 - `instructions`
   给 LLM 的模板级补充说明
   这里最好写成非常窄的约束，而不是泛泛的自然语言说明
+- 对 `regex` 槽位的约束
+  LLM 补参不会放宽 regex 规则
+  如果某个槽位定义了 `regex` extractor，用户文本必须真实命中某个已配置 `pattern`，否则该槽位会被保留为缺失
+  这可以避免模型凭模板语义、默认值或相近表达把阈值、TopN 等强结构参数猜出来
 
 ## 匹配算法
 

@@ -33,6 +33,7 @@ SLOT_EXTRACTION_SYSTEM_PROMPT = """你是专业的问数场景参数提取引擎
 2. **优先使用提取器提示**：
    - **用户自定义提取器（slot_hints）**：keyword_value 类型提供关键词映射，regex 类型提供正则规则
    - **内置提取器（builtin_extractors）**：系统内置的提取能力，理解其 output_format 以正确填充
+   - **regex 是强约束**：regex 槽位必须确认用户表达完整落到某个 pattern 描述的结构，不能只凭模板上下文、默认值或近似语义补值
 3. **置信度评估**：
    - high：用户明确提及，且匹配提取器规则
    - medium：用户提及但需推断
@@ -61,6 +62,7 @@ SLOT_EXTRACTION_SYSTEM_PROMPT = """你是专业的问数场景参数提取引擎
 1. **优先检查 slot_hints（用户自定义规则）**：
    - 如果值匹配 keyword_value 的某个 case（用户表达 → 预定义值映射）→ 使用 custom 规则
    - 如果值匹配 regex 的某个 pattern（正则提取）→ 使用 custom 规则
+   - 如果 regex 没有完整命中任何 pattern，必须把该槽位视为缺失，不能用 LLM 猜测补齐
 
 2. **其次检查 builtin_extractors（内置规则）**：
    - 如果值符合 builtin_extractors 的 output_format 结构 → 使用 builtin 规则
@@ -83,6 +85,7 @@ SLOT_EXTRACTION_SYSTEM_PROMPT = """你是专业的问数场景参数提取引擎
 - 不要发明模板未定义的槽位
 - 不要猜测超出 slot_constraints 的值
 - 不要用低置信度值填充必填槽位
+- 不要为未命中 regex pattern 的 regex 槽位返回值
 - 不要返回非 JSON 格式内容
 - **不要直接返回原始文本表达（如"昨晚八点"），必须转换为结构化格式**
 
@@ -855,6 +858,9 @@ class OpenAICompatibleTemplateSlotResolver:
             f"input_text: {input_text}\n"
             f"normalized_text: {normalized_text}\n"
             f"template_instructions: {instructions or 'Only fill slots that are clearly supported by the query.'}\n"
+            "Regex rule: if a target slot has regex hints, only fill it when the user text clearly and completely "
+            "matches one listed pattern, including its key semantic parts such as metric/object, comparator, value, "
+            "unit, and ordering words. If no pattern is matched, omit that slot.\n"
             "Return JSON like {\"slots\": {\"slot_name\": value}}. "
             "Do not invent unsupported values. Omit unknown slots."
         )
@@ -1051,6 +1057,7 @@ def build_optimized_slot_extraction_prompt(
 1. 已提取槽位（current_slots）由规则引擎产出，优先信任，LLM 只补充缺失部分
 2. 内置提取器（builtin_extractors）描述了系统内置的提取能力，理解其 output_format
 3. 用户自定义提取器（slot_hints）提供了关键词映射和正则规则
+   - regex 槽位只有在用户表达完整命中某个 pattern 时才允许输出；否则必须省略该槽位
 4. 当前系统时间用于计算绝对时间范围（如"上周一到上周五"、"最近3天"的起止时间）
 5. 提取来源标识：
    - 使用内置规则提取 → extraction_source 标记为 "builtin"，按 output_format 输出
